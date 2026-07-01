@@ -14,18 +14,30 @@ test("icpSystemPrompt: individual vs company framing differs, no em dashes", () 
   expect(individual).not.toBe(company);
   expect(individual.toLowerCase()).toContain("one person");
   expect(company.toLowerCase()).toContain("company");
-  // both obey the copy rules (no em or en dash)
   expect(individual).not.toMatch(/[—–]/);
   expect(company).not.toMatch(/[—–]/);
 });
 
-test("saveIcp persists the audience choice on the ICP", async () => {
+test("saveIcp persists the audience choice, scoped to the caller", async () => {
   const t = convexTest(schema, modules);
-  const id = await t.mutation(api.icp.saveIcp, {
+  const userId = await t.run(async (ctx) =>
+    ctx.db.insert("users", { email: "u@example.com" }),
+  );
+  const as = t.withIdentity({ subject: `${userId}|s1` });
+
+  const id = await as.mutation(api.icp.saveIcp, {
     text: "People one step ahead in my field",
     source: {},
     audience: "individual",
   });
   const row = await t.run(async (ctx) => ctx.db.get(id));
   expect(row?.audience).toBe("individual");
+  expect(row?.userId).toBe(userId);
+});
+
+test("saveIcp requires authentication", async () => {
+  const t = convexTest(schema, modules);
+  await expect(
+    t.mutation(api.icp.saveIcp, { text: "x", source: {} }),
+  ).rejects.toThrow();
 });

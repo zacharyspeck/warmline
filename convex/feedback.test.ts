@@ -6,32 +6,33 @@ import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
 
-// Seed one icp + one person and return their ids.
+// Seed a user with their own icp + person; return ids and an authed tester.
 async function seed(t: ReturnType<typeof convexTest>) {
-  return await t.run(async (ctx) => {
+  const { userId, icpId, personId } = await t.run(async (ctx) => {
+    const userId = await ctx.db.insert("users", { email: "u@example.com" });
     const icpId = await ctx.db.insert("icp", {
+      userId,
       text: "AI founders",
       source: {},
     });
     const personId = await ctx.db.insert("persons", {
+      userId,
       name: "Han Wang",
       isSelf: false,
       role: "lead",
       relationshipToYou: "not_connected",
     });
-    return { icpId, personId };
+    return { userId, icpId, personId };
   });
+  const as = t.withIdentity({ subject: `${userId}|s1` });
+  return { userId, icpId, personId, as };
 }
 
 test("vote inserts a feedback row", async () => {
   const t = convexTest(schema, modules);
-  const { icpId, personId } = await seed(t);
+  const { icpId, personId, as } = await seed(t);
 
-  const id = await t.mutation(api.feedback.vote, {
-    icpId,
-    personId,
-    vote: "up",
-  });
+  const id = await as.mutation(api.feedback.vote, { icpId, personId, vote: "up" });
   expect(id).toBeTruthy();
 
   const rows = await t.run(async (ctx) => ctx.db.query("feedback").collect());
@@ -41,10 +42,10 @@ test("vote inserts a feedback row", async () => {
 
 test("voting again for the same (icp, person) replaces — one row, new value", async () => {
   const t = convexTest(schema, modules);
-  const { icpId, personId } = await seed(t);
+  const { icpId, personId, as } = await seed(t);
 
-  await t.mutation(api.feedback.vote, { icpId, personId, vote: "up" });
-  await t.mutation(api.feedback.vote, { icpId, personId, vote: "down" });
+  await as.mutation(api.feedback.vote, { icpId, personId, vote: "up" });
+  await as.mutation(api.feedback.vote, { icpId, personId, vote: "down" });
 
   const rows = await t.run(async (ctx) => ctx.db.query("feedback").collect());
   expect(rows.length).toBe(1);
@@ -53,21 +54,20 @@ test("voting again for the same (icp, person) replaces — one row, new value", 
 
 test("forIcp returns the votes for the icp", async () => {
   const t = convexTest(schema, modules);
-  const { icpId, personId } = await seed(t);
+  const { icpId, personId, as } = await seed(t);
 
-  await t.mutation(api.feedback.vote, { icpId, personId, vote: "up" });
+  await as.mutation(api.feedback.vote, { icpId, personId, vote: "up" });
 
-  const votes = await t.query(api.feedback.forIcp, { icpId });
+  const votes = await as.query(api.feedback.forIcp, { icpId });
   expect(votes).toEqual([{ personId, vote: "up" }]);
 });
 
-// The read-back the feed relies on: after voting, forIcp reports the selected
-// thumb per person, and re-voting flips the reported state (survives a reload).
 test("vote then state read-back: forIcp reflects each person's selected thumb", async () => {
   const t = convexTest(schema, modules);
-  const { icpId, personId } = await seed(t);
+  const { userId, icpId, personId, as } = await seed(t);
   const otherId = await t.run(async (ctx) =>
     ctx.db.insert("persons", {
+      userId,
       name: "Mara Chen",
       isSelf: false,
       role: "lead",
@@ -75,26 +75,32 @@ test("vote then state read-back: forIcp reflects each person's selected thumb", 
     }),
   );
 
-  await t.mutation(api.feedback.vote, { icpId, personId, vote: "up" });
-  await t.mutation(api.feedback.vote, { icpId, personId: otherId, vote: "down" });
+  await as.mutation(api.feedback.vote, { icpId, personId, vote: "up" });
+  await as.mutation(api.feedback.vote, { icpId, personId: otherId, vote: "down" });
 
   const state = new Map(
-    (await t.query(api.feedback.forIcp, { icpId })).map((v) => [
+    (await as.query(api.feedback.forIcp, { icpId })).map((v) => [
       v.personId,
       v.vote,
     ]),
   );
   expect(state.get(personId)).toBe("up");
   expect(state.get(otherId)).toBe("down");
+});
 
-  // Re-voting the same person replaces the thumb the UI shows as filled.
-  await t.mutation(api.feedback.vote, { icpId, personId, vote: "down" });
-  const after = new Map(
-    (await t.query(api.feedback.forIcp, { icpId })).map((v) => [
-      v.personId,
-      v.vote,
-    ]),
+test("cross-user: another user cannot vote on or read this icp", async () => {
+  const t = convexTest(schema, modules);
+  const { icpId, personId } = await seed(t);
+
+  // A different, unrelated user.
+  const otherUserId = await t.run(async (ctx) =>
+    ctx.db.insert("users", { email: "intruder@example.com" }),
   );
-  expect(after.get(personId)).toBe("down");
-  expect(after.get(otherId)).toBe("down");
+  const asOther = t.withIdentity({ subject: `${otherUserId}|s1` });
+
+  await expect(
+    asOther.mutation(api.feedback.vote, { icpId, personId, vote: "up" }),
+  ).rejects.toThrow();
+  // reading the other user's icp yields nothing
+  expect(await asOther.query(api.feedback.forIcp, { icpId })).toEqual([]);
 });

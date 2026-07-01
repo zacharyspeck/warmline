@@ -6,10 +6,19 @@ import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
 
+async function newUser(t: ReturnType<typeof convexTest>, email: string) {
+  const userId = await t.run(async (ctx) =>
+    ctx.db.insert("users", { email }),
+  );
+  return { userId, as: t.withIdentity({ subject: `${userId}|s1` }) };
+}
+
 test("fallback heuristic: sorts by score desc, excludes self, flags gatekeepers", async () => {
   const t = convexTest(schema, modules);
+  const { userId, as } = await newUser(t, "a@example.com");
   await t.run(async (ctx) => {
     await ctx.db.insert("persons", {
+      userId,
       name: "Me Myself",
       isSelf: true,
       role: "connector",
@@ -17,6 +26,7 @@ test("fallback heuristic: sorts by score desc, excludes self, flags gatekeepers"
       tieStrength: 1,
     });
     await ctx.db.insert("persons", {
+      userId,
       name: "Warm Lead",
       isSelf: false,
       role: "lead",
@@ -24,103 +34,72 @@ test("fallback heuristic: sorts by score desc, excludes self, flags gatekeepers"
       tieStrength: 0.9,
     });
     await ctx.db.insert("persons", {
+      userId,
       name: "Cold Lead",
       isSelf: false,
       role: "lead",
       relationshipToYou: "not_connected",
     });
     await ctx.db.insert("persons", {
+      userId,
       name: "Big Connector",
       isSelf: false,
       role: "connector",
       relationshipToYou: "connected",
       tieStrength: 0.5,
-      unlockValue: 10, // >= GATEKEEPER_MIN (8)
+      unlockValue: 10,
     });
     await ctx.db.insert("persons", {
+      userId,
       name: "Small Connector",
       isSelf: false,
       role: "connector",
       relationshipToYou: "not_connected",
-      unlockValue: 3, // < 8
+      unlockValue: 3,
     });
   });
 
-  const rows = await t.query(api.feed.list, {});
+  const rows = await as.query(api.feed.list, {});
 
-  // self is excluded
   expect(rows.find((r) => r.name === "Me Myself")).toBeUndefined();
   expect(rows.length).toBe(4);
 
-  // sorted by score desc
   const scores = rows.map((r) => r.score);
   expect(scores).toEqual([...scores].sort((a, b) => b - a));
 
-  // gatekeeper flag from unlockValue threshold
   const big = rows.find((r) => r.name === "Big Connector");
   const small = rows.find((r) => r.name === "Small Connector");
   expect(big?.gatekeeper).toBe(true);
   expect(small?.gatekeeper).toBe(false);
 
-  // warm connected lead outranks the cold one
   const warm = rows.find((r) => r.name === "Warm Lead");
   const cold = rows.find((r) => r.name === "Cold Lead");
   expect(warm!.score).toBeGreaterThan(cold!.score);
 });
 
-test("mutuals: a lead's row lists the connector bridged by a shared_company edge", async () => {
-  const t = convexTest(schema, modules);
-  const { leadId } = await t.run(async (ctx) => {
-    const leadId = await ctx.db.insert("persons", {
-      name: "Target Lead",
-      isSelf: false,
-      role: "lead",
-      relationshipToYou: "not_connected",
-    });
-    const connectorId = await ctx.db.insert("persons", {
-      name: "Bridge Person",
-      isSelf: false,
-      role: "connector",
-      relationshipToYou: "connected",
-      tieStrength: 0.6,
-    });
-    await ctx.db.insert("edges", {
-      from: connectorId,
-      to: leadId,
-      type: "shared_company",
-      confidence: 0.8,
-      evidence: "Both at Stripe 2019-2021",
-    });
-    return { leadId };
-  });
-
-  const rows = await t.query(api.feed.list, {});
-  const lead = rows.find((r) => r.id === leadId);
-  expect(lead).toBeDefined();
-  expect(lead!.mutuals.map((m) => m.name)).toContain("Bridge Person");
-});
-
-// Han Wang is a gatekeeper connector: his warm path is the leads he unlocks, so
-// his row must show a fan-out stack with a total, never "No path yet".
 test("connector row shows its fan-out as a warm-path stack with a total", async () => {
   const t = convexTest(schema, modules);
+  const { userId, as } = await newUser(t, "b@example.com");
   const { hanId } = await t.run(async (ctx) => {
     const hanId = await ctx.db.insert("persons", {
+      userId,
       name: "Han Wang",
       isSelf: false,
       role: "connector",
       relationshipToYou: "connected",
       tieStrength: 0.9,
-      unlockValue: 4, // > 0 so the connector row appears in the feed
+      unlockValue: 4,
     });
     for (const name of ["Lead A", "Lead B", "Lead C", "Lead D"]) {
       const leadId = await ctx.db.insert("persons", {
+        userId,
         name,
         isSelf: false,
         role: "lead",
         relationshipToYou: "not_connected",
       });
       await ctx.db.insert("edges", {
+        userId,
         from: hanId,
         to: leadId,
         type: "engagement",
@@ -131,22 +110,60 @@ test("connector row shows its fan-out as a warm-path stack with a total", async 
     return { hanId };
   });
 
-  const rows = await t.query(api.feed.list, {});
+  const rows = await as.query(api.feed.list, {});
   const han = rows.find((r) => r.id === hanId);
   expect(han).toBeDefined();
-  // a real stack (not the empty state) capped at 3, with the true total of 4
   expect(han!.mutuals.length).toBe(3);
   expect(han!.mutualsTotal).toBe(4);
 });
 
+test("mutuals: a lead's row lists the connector bridged by a shared_company edge", async () => {
+  const t = convexTest(schema, modules);
+  const { userId, as } = await newUser(t, "c@example.com");
+  const { leadId } = await t.run(async (ctx) => {
+    const leadId = await ctx.db.insert("persons", {
+      userId,
+      name: "Target Lead",
+      isSelf: false,
+      role: "lead",
+      relationshipToYou: "not_connected",
+    });
+    const connectorId = await ctx.db.insert("persons", {
+      userId,
+      name: "Bridge Person",
+      isSelf: false,
+      role: "connector",
+      relationshipToYou: "connected",
+      tieStrength: 0.6,
+    });
+    await ctx.db.insert("edges", {
+      userId,
+      from: connectorId,
+      to: leadId,
+      type: "shared_company",
+      confidence: 0.8,
+      evidence: "Both at Stripe 2019-2021",
+    });
+    return { leadId };
+  });
+
+  const rows = await as.query(api.feed.list, {});
+  const lead = rows.find((r) => r.id === leadId);
+  expect(lead).toBeDefined();
+  expect(lead!.mutuals.map((m) => m.name)).toContain("Bridge Person");
+});
+
 test("recommendation path: lead appears with the recommendation's why/how", async () => {
   const t = convexTest(schema, modules);
+  const { userId, as } = await newUser(t, "d@example.com");
   const { leadId } = await t.run(async (ctx) => {
     const icpId = await ctx.db.insert("icp", {
+      userId,
       text: "AI founders",
       source: {},
     });
     const leadId = await ctx.db.insert("persons", {
+      userId,
       name: "Recommended Lead",
       isSelf: false,
       role: "lead",
@@ -154,6 +171,7 @@ test("recommendation path: lead appears with the recommendation's why/how", asyn
       company: "Acme",
     });
     await ctx.db.insert("recommendations", {
+      userId,
       personId: leadId,
       icpId,
       kind: "lead",
@@ -166,10 +184,37 @@ test("recommendation path: lead appears with the recommendation's why/how", asyn
     return { leadId };
   });
 
-  const rows = await t.query(api.feed.list, {});
+  const rows = await as.query(api.feed.list, {});
   const lead = rows.find((r) => r.id === leadId);
   expect(lead).toBeDefined();
   expect(lead!.score).toBe(88);
   expect(lead!.why[0]).toEqual({ text: "Strong ICP fit", confidence: "high" });
   expect(lead!.how).toEqual(["LinkedIn", "shared interest", "Hey there"]);
+});
+
+test("feed is isolated: a user never sees another user's people", async () => {
+  const t = convexTest(schema, modules);
+  const a = await newUser(t, "iso-a@example.com");
+  const b = await newUser(t, "iso-b@example.com");
+  await t.run(async (ctx) => {
+    await ctx.db.insert("persons", {
+      userId: a.userId,
+      name: "A Lead",
+      isSelf: false,
+      role: "lead",
+      relationshipToYou: "not_connected",
+    });
+    await ctx.db.insert("persons", {
+      userId: b.userId,
+      name: "B Lead",
+      isSelf: false,
+      role: "lead",
+      relationshipToYou: "not_connected",
+    });
+  });
+
+  const aRows = await a.as.query(api.feed.list, {});
+  const bRows = await b.as.query(api.feed.list, {});
+  expect(aRows.map((r) => r.name)).toEqual(["A Lead"]);
+  expect(bRows.map((r) => r.name)).toEqual(["B Lead"]);
 });

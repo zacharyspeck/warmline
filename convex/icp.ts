@@ -7,7 +7,9 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { embed } from "./openai";
+import { requireUser } from "./authz";
 
 const sourceValidator = v.object({
   website: v.optional(v.string()),
@@ -19,7 +21,6 @@ const sourceValidator = v.object({
 // + who the feed is for (individual vs company).
 export const saveIcp = mutation({
   args: {
-    userId: v.optional(v.id("users")),
     text: v.string(),
     source: sourceValidator,
     audience: v.optional(
@@ -28,8 +29,9 @@ export const saveIcp = mutation({
   },
   returns: v.id("icp"),
   handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
     return await ctx.db.insert("icp", {
-      userId: args.userId,
+      userId,
       text: args.text,
       source: args.source,
       ...(args.audience ? { audience: args.audience } : {}),
@@ -82,7 +84,13 @@ export const latest = query({
     v.null(),
   ),
   handler: async (ctx) => {
-    const icp = await ctx.db.query("icp").order("desc").first();
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return null;
+    const icp = await ctx.db
+      .query("icp")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .order("desc")
+      .first();
     if (!icp) return null;
     return { _id: icp._id, text: icp.text, hasVector: !!icp.vector };
   },

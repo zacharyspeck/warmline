@@ -2,6 +2,7 @@ import { query, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { introScore } from "./lib";
+import { requireUser } from "./authz";
 
 // React-Flow-ready warm-path data for one person.
 //
@@ -37,10 +38,12 @@ type You = { id?: Id<"persons">; name: string; avatarUrl?: string };
 // Best-effort lookup of "You" (the graph origin). Self is always created with
 // role "connector" (ingest.ingestSelf) and there is no isSelf index, so scan a
 // bounded slice of connectors. Falls back to a generic origin node.
-async function findYou(ctx: QueryCtx): Promise<You> {
+async function findYou(ctx: QueryCtx, userId: Id<"users">): Promise<You> {
   const connectors = await ctx.db
     .query("persons")
-    .withIndex("by_role", (q) => q.eq("role", "connector"))
+    .withIndex("by_user_and_role", (q) =>
+      q.eq("userId", userId).eq("role", "connector"),
+    )
     .take(500);
   const self = connectors.find((p) => p.isSelf);
   return self
@@ -65,9 +68,12 @@ export const pathForPerson = query({
     }),
   ),
   handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
     const person = await ctx.db.get(args.personId);
-    if (!person) throw new Error("Person not found");
-    const you = await findYou(ctx);
+    // Deny a direct id lookup across users.
+    if (!person || person.userId !== userId)
+      throw new Error("Person not found");
+    const you = await findYou(ctx, userId);
 
     if (person.role === "lead") {
       // Top connectors bridging You → Lead, ranked by intro_score.
@@ -85,7 +91,7 @@ export const pathForPerson = query({
       }[] = [];
       for (const e of edges) {
         const c = await ctx.db.get(e.from);
-        if (!c) continue;
+        if (!c || c.userId !== userId) continue;
         scored.push({
           id: c._id,
           name: c.name,
@@ -136,7 +142,7 @@ export const pathForPerson = query({
       if (seen.has(e.to)) continue;
       seen.add(e.to);
       const lead = await ctx.db.get(e.to);
-      if (!lead || lead.role !== "lead") continue;
+      if (!lead || lead.userId !== userId || lead.role !== "lead") continue;
       unlocks.push({ id: lead._id, name: lead.name, avatarUrl: lead.avatarUrl });
       if (unlocks.length === 12) break;
     }

@@ -249,8 +249,13 @@ function slugFor(name: string, i: number): string {
 }
 
 export const seedNetwork = internalMutation({
-  args: { leads: v.optional(v.number()), connectors: v.optional(v.number()) },
+  args: {
+    leads: v.optional(v.number()),
+    connectors: v.optional(v.number()),
+    userId: v.optional(v.id("users")),
+  },
   returns: v.object({
+    userId: v.id("users"),
     persons: v.number(),
     edges: v.number(),
     leads: v.number(),
@@ -260,30 +265,69 @@ export const seedNetwork = internalMutation({
     const nLeads = args.leads ?? 34;
     const nConnectors = args.connectors ?? 12;
 
-    // Idempotent: clear the Warmline domain tables (auth/users/connectors untouched).
-    for (const table of [
-      "recommendations",
-      "feedback",
-      "attendance",
-      "edges",
-      "personVectors",
-      "persons",
-      "events",
-      "icp",
-    ] as const) {
-      for (const row of await ctx.db.query(table).collect()) {
-        await ctx.db.delete(row._id);
-      }
+    // Resolve the owner: explicit arg, else the demo account.
+    let userId = args.userId;
+    if (!userId) {
+      const users = await ctx.db.query("users").take(1000);
+      const demo = users.find((u) => u.email === DEMO_EMAIL);
+      userId =
+        demo?._id ??
+        (await ctx.db.insert("users", {
+          email: DEMO_EMAIL,
+          name: "Warmline Demo",
+        }));
     }
+
+    // Idempotent, per user: clear ONLY this user's network. Other users' data,
+    // and the auth/users/connectors tables, are untouched.
+    const owned = await ctx.db
+      .query("persons")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    const ownedIds = new Set(owned.map((p) => p._id));
+    for (const pv of await ctx.db.query("personVectors").collect()) {
+      if (ownedIds.has(pv.personId)) await ctx.db.delete(pv._id);
+    }
+    for (const fb of await ctx.db.query("feedback").collect()) {
+      if (ownedIds.has(fb.personId)) await ctx.db.delete(fb._id);
+    }
+    for (const r of await ctx.db
+      .query("recommendations")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect())
+      await ctx.db.delete(r._id);
+    for (const a of await ctx.db
+      .query("attendance")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect())
+      await ctx.db.delete(a._id);
+    for (const e of await ctx.db
+      .query("edges")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect())
+      await ctx.db.delete(e._id);
+    for (const ev of await ctx.db
+      .query("events")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect())
+      await ctx.db.delete(ev._id);
+    for (const i of await ctx.db
+      .query("icp")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect())
+      await ctx.db.delete(i._id);
+    for (const p of owned) await ctx.db.delete(p._id);
 
     // The goal (icp) — without it the app redirects to onboarding.
     await ctx.db.insert("icp", {
+      userId,
       text: "Founders and heads of growth at Series A to C dev tools companies",
       source: {},
     });
 
     // Self.
     await ctx.db.insert("persons", {
+      userId,
       name: "You",
       isSelf: true,
       role: "connector",
@@ -299,6 +343,7 @@ export const seedNetwork = internalMutation({
       const role = LEAD_ROLES[i % LEAD_ROLES.length];
       const connected = i % 6 === 0;
       const id = await ctx.db.insert("persons", {
+        userId,
         name,
         headline: `${role} at ${company}`,
         company,
@@ -324,6 +369,7 @@ export const seedNetwork = internalMutation({
         targets.add(leadIds[(c * 5 + k * 3) % leadIds.length]);
       }
       const connId = await ctx.db.insert("persons", {
+        userId,
         name,
         headline: `${title}, ex-${company}`,
         company,
@@ -337,6 +383,7 @@ export const seedNetwork = internalMutation({
       for (const to of targets) {
         const ev = EVIDENCE[edges % EVIDENCE.length];
         await ctx.db.insert("edges", {
+          userId,
           from: connId,
           to,
           type: ev.type,
@@ -348,6 +395,7 @@ export const seedNetwork = internalMutation({
     }
 
     return {
+      userId,
       persons: nLeads + nConnectors + 1,
       edges,
       leads: nLeads,

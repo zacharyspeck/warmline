@@ -47,11 +47,16 @@ test("backfillToDemo stamps the demo userId on pre-multi-user rows", async () =>
 
 test("seedNetwork produces a substantive, ranked-feed-ready network", async () => {
   const t = convexTest(schema, modules);
-  const res = await t.mutation(internal.devSeed.seedNetwork, {});
+  const userId = await t.run(async (ctx) =>
+    ctx.db.insert("users", { email: "seed@example.com" }),
+  );
+  const as = t.withIdentity({ subject: `${userId}|s1` });
+  const res = await t.mutation(internal.devSeed.seedNetwork, { userId });
   expect(res.leads).toBeGreaterThanOrEqual(20);
   expect(res.edges).toBeGreaterThan(0);
+  expect(res.userId).toBe(userId);
 
-  const rows = await t.query(api.feed.list, { limit: 40 });
+  const rows = await as.query(api.feed.list, { limit: 40 });
   // a healthy feed, not three rows
   expect(rows.length).toBeGreaterThanOrEqual(20);
   expect(rows.length).toBeLessThanOrEqual(50);

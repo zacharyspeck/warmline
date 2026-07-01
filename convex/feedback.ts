@@ -1,8 +1,10 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireUser } from "./authz";
 
 // Thumbs up/down on a feed row. Replaces any prior vote for the same (icp, person).
-// The next rank run reads these to nudge the ICP vector.
+// The next rank run reads these to nudge the ICP vector. feedback rows are scoped
+// through their icp (which carries userId): a cross-user icpId/personId is denied.
 export const vote = mutation({
   args: {
     icpId: v.id("icp"),
@@ -11,6 +13,12 @@ export const vote = mutation({
   },
   returns: v.id("feedback"),
   handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const icp = await ctx.db.get(args.icpId);
+    if (!icp || icp.userId !== userId) throw new Error("Not found");
+    const person = await ctx.db.get(args.personId);
+    if (!person || person.userId !== userId) throw new Error("Not found");
+
     const existing = await ctx.db
       .query("feedback")
       .withIndex("by_person", (q) => q.eq("personId", args.personId))
@@ -35,6 +43,9 @@ export const forIcp = query({
     }),
   ),
   handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    const icp = await ctx.db.get(args.icpId);
+    if (!icp || icp.userId !== userId) return [];
     const rows = await ctx.db
       .query("feedback")
       .withIndex("by_icp", (q) => q.eq("icpId", args.icpId))

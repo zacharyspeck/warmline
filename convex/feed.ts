@@ -2,6 +2,7 @@ import { query } from "./_generated/server";
 import { v } from "convex/values";
 import { Doc } from "./_generated/dataModel";
 import { QueryCtx } from "./_generated/server";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { initials, confLabel, reachability, introScore } from "./lib";
 
 // Feed for the list UI. Prefers ranked `recommendations` (real goal-fit + LLM
@@ -156,7 +157,15 @@ export const list = query({
   returns: v.array(feedRow),
   handler: async (ctx, args) => {
     const limit = args.limit ?? 25;
-    const icp = await ctx.db.query("icp").order("desc").first();
+    // Per-user feed: signed-out callers get nothing (the Phase D demo reads the
+    // demo account through a dedicated path, never this one).
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return [];
+    const icp = await ctx.db
+      .query("icp")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .order("desc")
+      .first();
     const pre: Pre[] = [];
 
     // Lead rows: prefer ranked recommendations; else a reachability heuristic.
@@ -185,7 +194,9 @@ export const list = query({
     } else {
       const leads = await ctx.db
         .query("persons")
-        .withIndex("by_role", (q) => q.eq("role", "lead"))
+        .withIndex("by_user_and_role", (q) =>
+          q.eq("userId", userId).eq("role", "lead"),
+        )
         .take(400);
       for (const p of leads) {
         if (p.isSelf) continue;
@@ -198,7 +209,9 @@ export const list = query({
     const seen = new Set(pre.map((x) => x.p._id));
     const connectorDocs = await ctx.db
       .query("persons")
-      .withIndex("by_role", (q) => q.eq("role", "connector"))
+      .withIndex("by_user_and_role", (q) =>
+        q.eq("userId", userId).eq("role", "connector"),
+      )
       .take(400);
     const topConnectors = connectorDocs
       .filter((c) => !c.isSelf && (c.unlockValue ?? 0) > 0 && !seen.has(c._id))
