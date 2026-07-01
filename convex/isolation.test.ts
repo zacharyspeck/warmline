@@ -2,12 +2,16 @@
 // Phase C hard gate: two users, each with a full seeded network, both ranked —
 // and NO query or action lets one read or write the other's persons, edges,
 // recommendations, feed, or feedback, including direct cross-user id lookups.
+// Phase D extends the gate to the public surface: anonymous callers can read
+// ONLY the demo account (api.demo.*), never write it, and the signup flow is
+// invite-gated server-side.
 import { convexTest, type TestConvex } from "convex-test";
 import { expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 import { Id } from "./_generated/dataModel";
 import { DEMO_EMAIL } from "./devSeed";
+import { loadDemo } from "./seedDemo";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -428,4 +432,228 @@ test("icp.embedIcp: only the authenticated owner reaches the embed; anyone else 
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   }
+});
+
+test("demo surface: anonymous callers read ONLY the demo account, and crafted ids are denied", async () => {
+  const t = convexTest(schema, modules);
+  const A = await buildWorld(t, "alice@example.com", 0);
+
+  // No demo account yet: the demo feed is empty — never a fallback onto A.
+  expect(await t.query(api.demo.feed, {})).toEqual([]);
+
+  // Seed the demo network the way the admin loaders do (internal function).
+  await t.mutation(internal.devSeed.seedNetwork, {});
+  const demoPersonIds = await t.run(async (ctx) => {
+    const demo = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", DEMO_EMAIL))
+      .unique();
+    const persons = await ctx.db
+      .query("persons")
+      .withIndex("by_user", (q) => q.eq("userId", demo!._id))
+      .collect();
+    return persons.map((p) => p._id);
+  });
+  const demoIds = new Set(demoPersonIds);
+
+  // Anonymous feed read: every row is the demo account's, none is A's.
+  const feed = await t.query(api.demo.feed, {});
+  expect(feed.length).toBeGreaterThan(0);
+  for (const row of feed) {
+    expect(demoIds.has(row.id)).toBe(true);
+    expect(A.personIds.has(row.id)).toBe(false);
+  }
+
+  // Anonymous graph read for a demo person: every node in the path is demo's.
+  const path = await t.query(api.demo.pathForPerson, {
+    personId: feed[0].id,
+  });
+  if (path.kind === "lead") {
+    expect(demoIds.has(path.target.id)).toBe(true);
+    for (const c of path.connectors) expect(demoIds.has(c.id)).toBe(true);
+    if (path.you.id) expect(demoIds.has(path.you.id)).toBe(true);
+  } else {
+    expect(demoIds.has(path.connector.id)).toBe(true);
+    for (const u of path.unlocks) expect(demoIds.has(u.id)).toBe(true);
+    if (path.you.id) expect(demoIds.has(path.you.id)).toBe(true);
+  }
+
+  // Crafted request #1: a REAL user's person id on the demo surface — denied
+  // exactly like a cross-user lookup.
+  await expect(
+    t.query(api.demo.pathForPerson, { personId: A.leadIds[0] }),
+  ).rejects.toThrow(/not found/i);
+  await expect(
+    t.query(api.demo.pathForPerson, { personId: A.connectorIds[0] }),
+  ).rejects.toThrow(/not found/i);
+
+  // Crafted request #2: smuggling an owner/user id into the arg-less demo
+  // queries — rejected by the argument validator, never read by a handler.
+  await expect(
+    // @ts-expect-error — the demo surface accepts no user id of any kind
+    t.query(api.demo.feed, { userId: A.userId }),
+  ).rejects.toThrow(/Unexpected field `userId`/);
+  await expect(
+    // @ts-expect-error — same for the graph query
+    t.query(api.demo.pathForPerson, { personId: feed[0].id, userId: A.userId }),
+  ).rejects.toThrow(/Unexpected field `userId`/);
+
+  // ...and ONLY the demo surface answers anonymously: the real surfaces stay shut.
+  expect(await t.query(api.feed.list, {})).toEqual([]);
+  expect(await t.query(api.icp.latest, {})).toBeNull();
+  expect(await t.query(api.auth.currentUser, {})).toBeNull();
+});
+
+test("signup gate: a direct backend call with a bad, missing, or absent-config invite code is rejected", async () => {
+  const t = convexTest(schema, modules);
+  const params = {
+    email: "eve@example.com",
+    password: "password123",
+    flow: "signUp",
+  };
+
+  // Fail closed: INVITE_CODE not set on the deployment → every signup is
+  // rejected, whatever the caller sends.
+  await expect(
+    t.action(api.auth.signIn, {
+      provider: "password",
+      params: { ...params, inviteCode: "anything" },
+    }),
+  ).rejects.toThrow(/Invalid invite code/);
+
+  vi.stubEnv("INVITE_CODE", "right-code");
+  try {
+    // Wrong code and missing code: the SAME generic error, before any account
+    // row is created.
+    await expect(
+      t.action(api.auth.signIn, {
+        provider: "password",
+        params: { ...params, inviteCode: "wrong-code" },
+      }),
+    ).rejects.toThrow(/Invalid invite code/);
+    await expect(
+      t.action(api.auth.signIn, { provider: "password", params }),
+    ).rejects.toThrow(/Invalid invite code/);
+
+    // The demo account cannot be signed up EVEN WITH the correct code — same
+    // generic error, so the address is not marked as special.
+    await expect(
+      t.action(api.auth.signIn, {
+        provider: "password",
+        params: { ...params, email: DEMO_EMAIL, inviteCode: "right-code" },
+      }),
+    ).rejects.toThrow(/Invalid invite code/);
+
+    // None of the rejected attempts left a user or credential behind.
+    await t.run(async (ctx) => {
+      expect(await ctx.db.query("users").collect()).toEqual([]);
+      expect(await ctx.db.query("authAccounts").collect()).toEqual([]);
+    });
+
+    // The correct code passes the gate: the full signup flow succeeds (a real
+    // RS256 key is stubbed so token issuance works) and creates exactly one
+    // user + password credential.
+    const keyPair = await crypto.subtle.generateKey(
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256",
+      },
+      true,
+      ["sign", "verify"],
+    );
+    const pkcs8 = new Uint8Array(
+      await crypto.subtle.exportKey("pkcs8", keyPair.privateKey),
+    );
+    let b64 = "";
+    for (const byte of pkcs8) b64 += String.fromCharCode(byte);
+    b64 = btoa(b64);
+    const pem = `-----BEGIN PRIVATE KEY-----\n${b64.match(/.{1,64}/g)!.join("\n")}\n-----END PRIVATE KEY-----`;
+    vi.stubEnv("JWT_PRIVATE_KEY", pem);
+    vi.stubEnv("CONVEX_SITE_URL", "https://test.convex.site");
+
+    const result = await t.action(api.auth.signIn, {
+      provider: "password",
+      params: { ...params, inviteCode: "right-code" },
+    });
+    expect(result.tokens).not.toBeNull();
+    await t.run(async (ctx) => {
+      const users = await ctx.db.query("users").collect();
+      expect(users.map((u) => u.email)).toEqual(["eve@example.com"]);
+      const accounts = await ctx.db.query("authAccounts").collect();
+      expect(accounts.length).toBe(1);
+      expect(accounts[0].provider).toBe("password");
+    });
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+test("no anonymous write path to demo data exists", async () => {
+  const t = convexTest(schema, modules);
+  await t.mutation(internal.devSeed.seedNetwork, {});
+  const before = await t.run(async (ctx) => {
+    const demo = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", DEMO_EMAIL))
+      .unique();
+    const icp = await ctx.db
+      .query("icp")
+      .withIndex("by_user", (q) => q.eq("userId", demo!._id))
+      .unique();
+    const persons = await ctx.db
+      .query("persons")
+      .withIndex("by_user", (q) => q.eq("userId", demo!._id))
+      .collect();
+    return {
+      icpId: icp!._id,
+      personId: persons[0]._id,
+      personCount: persons.length,
+    };
+  });
+
+  // The demo loader is INTERNAL: it is not on the public api surface at all,
+  // so no client — anonymous or signed-in — can invoke it.
+  expect(loadDemo.isInternal).toBe(true);
+  expect(
+    (loadDemo as unknown as { isPublic?: boolean }).isPublic,
+  ).toBeUndefined();
+
+  // Anonymous votes against the demo account's own icp/person ids: rejected
+  // before any write (logged-out thumbs prompt sign-up instead of writing).
+  await expect(
+    t.mutation(api.feedback.vote, {
+      icpId: before.icpId,
+      personId: before.personId,
+      vote: "up",
+    }),
+  ).rejects.toThrow(/Not authenticated/);
+  // Anonymous icp writes: rejected.
+  await expect(
+    t.mutation(api.icp.saveIcp, { text: "hijack", source: {} }),
+  ).rejects.toThrow(/Not authenticated/);
+
+  // Nothing about the demo account changed: same rows, no feedback appeared.
+  await t.run(async (ctx) => {
+    const demo = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", DEMO_EMAIL))
+      .unique();
+    const persons = await ctx.db
+      .query("persons")
+      .withIndex("by_user", (q) => q.eq("userId", demo!._id))
+      .collect();
+    expect(persons.length).toBe(before.personCount);
+    const votes = await ctx.db
+      .query("feedback")
+      .withIndex("by_icp", (q) => q.eq("icpId", before.icpId))
+      .collect();
+    expect(votes).toEqual([]);
+    const icps = await ctx.db
+      .query("icp")
+      .withIndex("by_user", (q) => q.eq("userId", demo!._id))
+      .collect();
+    expect(icps.map((i) => i._id)).toEqual([before.icpId]);
+  });
 });
