@@ -39,15 +39,17 @@ export const saveIcp = mutation({
   },
 });
 
-export const get = internalQuery({
-  args: { icpId: v.id("icp") },
+// Owner-scoped read for embedIcp: a missing icp and a foreign icp look the
+// same (null), so the public action can't be used to probe other users' ids.
+export const getOwned = internalQuery({
+  args: { icpId: v.id("icp"), userId: v.id("users") },
   returns: v.union(
     v.object({ text: v.string(), hasVector: v.boolean() }),
     v.null(),
   ),
   handler: async (ctx, args) => {
     const icp = await ctx.db.get(args.icpId);
-    if (!icp) return null;
+    if (!icp || icp.userId !== args.userId) return null;
     return { text: icp.text, hasVector: !!icp.vector };
   },
 });
@@ -61,12 +63,20 @@ export const setVector = internalMutation({
   },
 });
 
-// Embed the ICP text into a vector (OpenAI). Run once after saveIcp.
+// Embed the ICP text into a vector (OpenAI). Run once after saveIcp. Requires
+// an authenticated caller who OWNS the icp: this is a public action that both
+// spends OpenAI credits and rewrites the icp's ranking vector, so an anonymous
+// or cross-user call is denied before any model call.
 export const embedIcp = action({
   args: { icpId: v.id("icp") },
   returns: v.object({ dims: v.number() }),
   handler: async (ctx, args) => {
-    const icp = await ctx.runQuery(internal.icp.get, { icpId: args.icpId });
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Not authenticated");
+    const icp = await ctx.runQuery(internal.icp.getOwned, {
+      icpId: args.icpId,
+      userId,
+    });
     if (!icp) throw new Error("icp not found");
     const vector = await embed(icp.text);
     await ctx.runMutation(internal.icp.setVector, {

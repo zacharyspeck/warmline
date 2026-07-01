@@ -384,3 +384,48 @@ test("extension HTTP routes: anonymous callers are rejected outright; only the s
     vi.unstubAllEnvs();
   }
 });
+
+test("icp.embedIcp: only the authenticated owner reaches the embed; anyone else is denied before any OpenAI call", async () => {
+  const t = convexTest(schema, modules);
+  const A = await buildWorld(t, "alice@example.com", 0);
+  const B = await buildWorld(t, "bob@example.com", 500);
+
+  // Anonymous caller: rejected at the auth gate. No OPENAI_API_KEY is set in
+  // tests, so reaching the embed would fail with a DIFFERENT error — the
+  // /Not authenticated/ match proves the gate fires first.
+  await expect(
+    t.action(api.icp.embedIcp, { icpId: A.icpId }),
+  ).rejects.toThrow(/Not authenticated/);
+
+  // A signed-in NON-owner: denied exactly like a missing doc, so the public
+  // action can't be used to probe which icp ids exist.
+  await expect(
+    B.as.action(api.icp.embedIcp, { icpId: A.icpId }),
+  ).rejects.toThrow(/not found/i);
+
+  // The owner passes the gate: with OpenAI stubbed, the embed runs and the
+  // vector lands on the owner's icp — and only there.
+  const bVectorBefore = await t.run(
+    async (ctx) => (await ctx.db.get(B.icpId))!.vector,
+  );
+  vi.stubEnv("OPENAI_API_KEY", "test-key");
+  vi.stubGlobal(
+    "fetch",
+    async () =>
+      new Response(JSON.stringify({ data: [{ embedding: vec(7) }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+  );
+  try {
+    const res = await A.as.action(api.icp.embedIcp, { icpId: A.icpId });
+    expect(res.dims).toBe(DIM);
+    await t.run(async (ctx) => {
+      expect((await ctx.db.get(A.icpId))!.vector).toEqual(vec(7));
+      expect((await ctx.db.get(B.icpId))!.vector).toEqual(bVectorBefore);
+    });
+  } finally {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  }
+});
