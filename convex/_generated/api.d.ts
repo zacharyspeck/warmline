@@ -24,6 +24,7 @@ import type * as http from "../http.js";
 import type * as icp from "../icp.js";
 import type * as ingest from "../ingest.js";
 import type * as lib from "../lib.js";
+import type * as limits from "../limits.js";
 import type * as linkedinCsv from "../linkedinCsv.js";
 import type * as linkedinImport from "../linkedinImport.js";
 import type * as myFunctions from "../myFunctions.js";
@@ -32,6 +33,7 @@ import type * as openai from "../openai.js";
 import type * as rank from "../rank.js";
 import type * as resolve from "../resolve.js";
 import type * as seedDemo from "../seedDemo.js";
+import type * as usage from "../usage.js";
 
 import type {
   ApiFromModules,
@@ -56,6 +58,7 @@ declare const fullApi: ApiFromModules<{
   icp: typeof icp;
   ingest: typeof ingest;
   lib: typeof lib;
+  limits: typeof limits;
   linkedinCsv: typeof linkedinCsv;
   linkedinImport: typeof linkedinImport;
   myFunctions: typeof myFunctions;
@@ -64,6 +67,7 @@ declare const fullApi: ApiFromModules<{
   rank: typeof rank;
   resolve: typeof resolve;
   seedDemo: typeof seedDemo;
+  usage: typeof usage;
 }>;
 
 /**

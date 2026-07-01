@@ -24,9 +24,48 @@ export const connectorMethod = v.union(
 
 export default defineSchema({
   ...authTables,
+  // authTables' users, widened with the Phase E spend tier. The field list and
+  // indexes must mirror @convex-dev/auth's definition exactly; only `tier` is
+  // ours. tier is a plain string normalized at READ (absent → "free"); a value
+  // missing from convex/limits.ts TIER_LIMITS gets zero budget, fail-closed.
+  users: defineTable({
+    name: v.optional(v.string()),
+    image: v.optional(v.string()),
+    email: v.optional(v.string()),
+    emailVerificationTime: v.optional(v.number()),
+    phone: v.optional(v.string()),
+    phoneVerificationTime: v.optional(v.number()),
+    isAnonymous: v.optional(v.boolean()),
+    tier: v.optional(v.string()),
+  })
+    .index("email", ["email"])
+    .index("phone", ["phone"]),
   numbers: defineTable({
     value: v.number(),
   }),
+
+  // ── Phase E cost caps (see convex/limits.ts for every cap) ──
+
+  // Per-user OpenAI/scrape spend, one row per user per UTC day. The day key
+  // rollover IS the daily reset — old rows just stop being read.
+  usage: defineTable({
+    userId: v.id("users"),
+    day: v.string(), // dayKey(now), "YYYY-MM-DD" UTC
+    judge: v.number(),
+    embed: v.number(),
+    scrape: v.number(),
+  })
+    .index("by_user_and_day", ["userId", "day"])
+    .index("by_day", ["day"]),
+
+  // Global spend across all users, one row per UTC day — makes the global-cap
+  // check O(1) inside the reserve transaction.
+  usageGlobal: defineTable({
+    day: v.string(),
+    judge: v.number(),
+    embed: v.number(),
+    scrape: v.number(),
+  }).index("by_day", ["day"]),
 
   // A source the user has linked to make their network searchable.
   // OAuth providers store an accountEmail; manual/auto exports store a
@@ -147,6 +186,10 @@ export default defineSchema({
     // Connector fan-out (leads they unlock) — bounded by the ≤12 node cap, inline array ok.
     unlocksIds: v.array(v.id("persons")),
     whyNow: v.optional(v.string()), // trigger: job change / new post / event
+    // True when why/how/opener came from the LLM judge; false/absent means
+    // heuristic (degraded) copy. The cron re-judges judged:false rows when
+    // budget returns and skips unchanged judged rows (Phase E).
+    judged: v.optional(v.boolean()),
   })
     .index("by_icp_and_score", ["icpId", "score"])
     .index("by_person", ["personId"])
