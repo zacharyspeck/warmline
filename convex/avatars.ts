@@ -2,19 +2,22 @@ import {
   internalAction,
   internalMutation,
   internalQuery,
+  type ActionCtx,
 } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 
-// Resolve a profile-pic URL from any of: Fiber KitchenSink (LinkedIn), unavatar
-// by X handle, unavatar by LinkedIn slug. Returns the first that yields an image.
+// Resolve a profile-pic URL. When a Fiber key is present, try Fiber KitchenSink
+// (LinkedIn) first; otherwise fall back to unavatar by X handle, then unavatar by
+// LinkedIn slug. Returns the first that yields an image, else undefined (the UI
+// then shows initials). A missing FIBER_API_KEY never throws — it just skips Fiber.
 async function resolvePic(
-  apiKey: string,
+  apiKey: string | undefined,
   slug?: string,
   xHandle?: string,
 ): Promise<string | undefined> {
-  if (slug) {
+  if (apiKey && slug) {
     try {
       const res = await fetch("https://api.fiber.ai/v1/kitchen-sink/person", {
         method: "POST",
@@ -29,7 +32,7 @@ async function resolvePic(
         if (pic) return pic;
       }
     } catch {
-      /* fall through */
+      /* fall through to unavatar */
     }
   }
   const probe = async (u: string): Promise<string | undefined> => {
@@ -54,9 +57,9 @@ async function resolvePic(
 }
 
 // Profile-picture enrichment. For the top people (by tie strength) that have a
-// LinkedIn slug but no avatar yet, resolve their picture via Fiber KitchenSink,
-// download it, and cache it ONCE in Convex storage (LinkedIn blocks hotlinking,
-// so we store the bytes, not the URL). Run via `npx convex run avatars:enrichTop`.
+// LinkedIn slug or X handle but no avatar yet, resolve their picture (Fiber when
+// keyed, else unavatar), download it, and cache it ONCE in Convex storage
+// (LinkedIn blocks hotlinking, so store the bytes, not the URL).
 
 function findProfilePic(obj: unknown, depth = 0): string | undefined {
   if (depth > 8 || obj === null || typeof obj !== "object") return undefined;
@@ -111,33 +114,10 @@ export const setAvatar = internalMutation({
   },
 });
 
-export const enrichTop = internalAction({
-  args: { limit: v.optional(v.number()) },
-  returns: v.object({ done: v.number(), failed: v.number() }),
-  handler: async (ctx, args) => {
-    const apiKey = process.env.FIBER_API_KEY;
-    if (!apiKey) throw new Error("FIBER_API_KEY not set");
-    const targets: {
-      id: Id<"persons">;
-      slug?: string;
-      xHandle?: string;
-    }[] = await ctx.runQuery(internal.avatars.needingAvatars, {
-      limit: args.limit ?? 40,
-    });
-    let done = 0;
-    let failed = 0;
-    for (const t of targets) {
-      if (await storeAvatar(ctx, apiKey, t.id, t.slug, t.xHandle)) done++;
-      else failed++;
-    }
-    return { done, failed };
-  },
-});
-
 // Helper: resolve + download + cache a person's avatar. Returns true on success.
 async function storeAvatar(
-  ctx: { storage: { store: (b: Blob) => Promise<Id<"_storage">>; getUrl: (id: Id<"_storage">) => Promise<string | null> }; runMutation: (ref: typeof internal.avatars.setAvatar, args: { personId: Id<"persons">; url: string }) => Promise<null> },
-  apiKey: string,
+  ctx: ActionCtx,
+  apiKey: string | undefined,
   personId: Id<"persons">,
   slug?: string,
   xHandle?: string,
@@ -157,14 +137,38 @@ async function storeAvatar(
   }
 }
 
+// Enrich the top people by tie strength. Runs on the daily cron and by hand via
+// `npx convex run avatars:enrichTop`. Uses Fiber when FIBER_API_KEY is set, else
+// unavatar; a missing key degrades instead of throwing.
+export const enrichTop = internalAction({
+  args: { limit: v.optional(v.number()) },
+  returns: v.object({ done: v.number(), failed: v.number(), keyed: v.boolean() }),
+  handler: async (ctx, args) => {
+    const apiKey = process.env.FIBER_API_KEY;
+    const targets: {
+      id: Id<"persons">;
+      slug?: string;
+      xHandle?: string;
+    }[] = await ctx.runQuery(internal.avatars.needingAvatars, {
+      limit: args.limit ?? 40,
+    });
+    let done = 0;
+    let failed = 0;
+    for (const t of targets) {
+      if (await storeAvatar(ctx, apiKey, t.id, t.slug, t.xHandle)) done++;
+      else failed++;
+    }
+    return { done, failed, keyed: !!apiKey };
+  },
+});
+
 // Enrich exactly the people currently in the feed (targets the visible rows,
 // not top-by-tie). Run via `npx convex run avatars:enrichFeed`.
 export const enrichFeed = internalAction({
   args: {},
-  returns: v.object({ done: v.number(), failed: v.number() }),
+  returns: v.object({ done: v.number(), failed: v.number(), keyed: v.boolean() }),
   handler: async (ctx) => {
     const apiKey = process.env.FIBER_API_KEY;
-    if (!apiKey) throw new Error("FIBER_API_KEY not set");
     const rows = await ctx.runQuery(api.feed.list, { limit: 40 });
     let done = 0;
     let failed = 0;
@@ -173,6 +177,6 @@ export const enrichFeed = internalAction({
       if (await storeAvatar(ctx, apiKey, r.id, r.linkedinUrl, r.xHandle)) done++;
       else failed++;
     }
-    return { done, failed };
+    return { done, failed, keyed: !!apiKey };
   },
 });

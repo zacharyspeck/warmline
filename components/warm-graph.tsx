@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -21,9 +21,9 @@ import { cn } from "@/lib/utils";
 //  • lead      → paths-in:  You → [Connectors] → Lead   (edges show evidence)
 //  • connector → fan-out:   You → Connector → [Leads]   ("+N more" past the cap)
 
-type Ref = { id: string; name: string };
+type Ref = { id: string; name: string; avatarUrl?: string };
 type ConnectorRef = Ref & { evidence: string; confidence: number };
-type You = { id?: string; name: string };
+type You = { id?: string; name: string; avatarUrl?: string };
 
 export type WarmGraphData =
   | { kind: "lead"; you: You; connectors: ConnectorRef[]; target: Ref }
@@ -51,8 +51,43 @@ function initialsOf(name: string): string {
 
 // ── Custom nodes ──
 type Tone = "you" | "connector" | "lead";
-type PersonData = { name: string; tone: Tone };
+type PersonData = { name: string; tone: Tone; avatarUrl?: string };
 type MoreData = { label: string };
+
+// Cached profile photo with an initials fallback. LinkedIn images are stored in
+// Convex storage; if one fails to load we drop to the tinted initials disc so a
+// broken URL never shows a broken-image icon.
+function NodeAvatar({
+  name,
+  url,
+  className,
+}: {
+  name: string;
+  url?: string;
+  className: string;
+}) {
+  const [errored, setErrored] = useState(false);
+  const showImg = !!url && !errored;
+  return (
+    <div
+      className={cn(
+        "relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-semibold text-white",
+        className,
+      )}
+    >
+      {showImg ? (
+        <img
+          src={url}
+          alt=""
+          className="h-full w-full rounded-full object-cover"
+          onError={() => setErrored(true)}
+        />
+      ) : (
+        initialsOf(name)
+      )}
+    </div>
+  );
+}
 
 // On-brand: avatar tints use the design-system chart palette; badges stay neutral
 // (the label carries the meaning). Matches the list's tokenized Badge variants.
@@ -84,14 +119,7 @@ function PersonNode({ data }: NodeProps) {
         position={Position.Left}
         className="!h-2 !w-2 !border-0 !bg-foreground/30"
       />
-      <div
-        className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white",
-          tone.avatar,
-        )}
-      >
-        {initialsOf(d.name)}
-      </div>
+      <NodeAvatar name={d.name} url={d.avatarUrl} className={tone.avatar} />
       <div className="min-w-0">
         <div className="truncate text-sm font-medium leading-tight text-card-foreground">
           {d.name}
@@ -175,7 +203,11 @@ function buildGraph(data: WarmGraphData): { nodes: Node[]; edges: Edge[] } {
     id: "you",
     type: "person",
     position: { x: COL.you, y: 0 },
-    data: { name: data.you.name, tone: "you" } satisfies PersonData,
+    data: {
+      name: data.you.name,
+      tone: "you",
+      avatarUrl: data.you.avatarUrl,
+    } satisfies PersonData,
   };
   nodes.push(youNode);
 
@@ -191,7 +223,11 @@ function buildGraph(data: WarmGraphData): { nodes: Node[]; edges: Edge[] } {
         id: `c-${c.id}`,
         type: "person",
         position: { x: COL.mid, y: colY(i, colCount || 1) },
-        data: { name: c.name, tone: "connector" } satisfies PersonData,
+        data: {
+          name: c.name,
+          tone: "connector",
+          avatarUrl: c.avatarUrl,
+        } satisfies PersonData,
       });
       edges.push(flowEdge(`e-you-${c.id}`, "you", `c-${c.id}`));
       edges.push(
@@ -216,7 +252,11 @@ function buildGraph(data: WarmGraphData): { nodes: Node[]; edges: Edge[] } {
       id: "target",
       type: "person",
       position: { x: COL.right, y: 0 },
-      data: { name: data.target.name, tone: "lead" } satisfies PersonData,
+      data: {
+        name: data.target.name,
+        tone: "lead",
+        avatarUrl: data.target.avatarUrl,
+      } satisfies PersonData,
     });
 
     // No known connector yet — show the cold gap explicitly.
@@ -237,7 +277,11 @@ function buildGraph(data: WarmGraphData): { nodes: Node[]; edges: Edge[] } {
     id: "conn",
     type: "person",
     position: { x: COL.mid, y: 0 },
-    data: { name: data.connector.name, tone: "connector" } satisfies PersonData,
+    data: {
+      name: data.connector.name,
+      tone: "connector",
+      avatarUrl: data.connector.avatarUrl,
+    } satisfies PersonData,
   });
   edges.push(flowEdge("e-you-conn", "you", "conn"));
 
@@ -251,7 +295,11 @@ function buildGraph(data: WarmGraphData): { nodes: Node[]; edges: Edge[] } {
       id: `u-${u.id}`,
       type: "person",
       position: { x: COL.right, y: colY(i, colCount || 1) },
-      data: { name: u.name, tone: "lead" } satisfies PersonData,
+      data: {
+        name: u.name,
+        tone: "lead",
+        avatarUrl: u.avatarUrl,
+      } satisfies PersonData,
     });
     edges.push(flowEdge(`e-conn-${u.id}`, "conn", `u-${u.id}`));
   });

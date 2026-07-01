@@ -15,21 +15,24 @@ import { introScore } from "./lib";
 const youValidator = v.object({
   id: v.optional(v.id("persons")),
   name: v.string(),
+  avatarUrl: v.optional(v.string()),
 });
 
 const nodeRef = v.object({
   id: v.id("persons"),
   name: v.string(),
+  avatarUrl: v.optional(v.string()),
 });
 
 const connectorRef = v.object({
   id: v.id("persons"),
   name: v.string(),
+  avatarUrl: v.optional(v.string()),
   evidence: v.string(),
   confidence: v.number(),
 });
 
-type You = { id?: Id<"persons">; name: string };
+type You = { id?: Id<"persons">; name: string; avatarUrl?: string };
 
 // Best-effort lookup of "You" (the graph origin). Self is always created with
 // role "connector" (ingest.ingestSelf) and there is no isSelf index, so scan a
@@ -40,7 +43,9 @@ async function findYou(ctx: QueryCtx): Promise<You> {
     .withIndex("by_role", (q) => q.eq("role", "connector"))
     .take(500);
   const self = connectors.find((p) => p.isSelf);
-  return self ? { id: self._id, name: self.name } : { name: "You" };
+  return self
+    ? { id: self._id, name: self.name, avatarUrl: self.avatarUrl }
+    : { name: "You" };
 }
 
 export const pathForPerson = query({
@@ -73,6 +78,7 @@ export const pathForPerson = query({
       const scored: {
         id: Id<"persons">;
         name: string;
+        avatarUrl?: string;
         evidence: string;
         confidence: number;
         score: number;
@@ -83,6 +89,7 @@ export const pathForPerson = query({
         scored.push({
           id: c._id,
           name: c.name,
+          avatarUrl: c.avatarUrl,
           evidence: e.evidence,
           confidence: e.confidence,
           score: introScore(c.tieStrength, e.confidence),
@@ -94,6 +101,7 @@ export const pathForPerson = query({
       const connectors: {
         id: Id<"persons">;
         name: string;
+        avatarUrl?: string;
         evidence: string;
         confidence: number;
       }[] = [];
@@ -103,6 +111,7 @@ export const pathForPerson = query({
         connectors.push({
           id: s.id,
           name: s.name,
+          avatarUrl: s.avatarUrl,
           evidence: s.evidence,
           confidence: s.confidence,
         });
@@ -112,7 +121,7 @@ export const pathForPerson = query({
         kind: "lead" as const,
         you,
         connectors,
-        target: { id: person._id, name: person.name },
+        target: { id: person._id, name: person.name, avatarUrl: person.avatarUrl },
       };
     }
 
@@ -122,19 +131,19 @@ export const pathForPerson = query({
       .withIndex("by_from", (q) => q.eq("from", person._id))
       .take(50);
     const seen = new Set<Id<"persons">>();
-    const unlocks: { id: Id<"persons">; name: string }[] = [];
+    const unlocks: { id: Id<"persons">; name: string; avatarUrl?: string }[] = [];
     for (const e of edges) {
       if (seen.has(e.to)) continue;
       seen.add(e.to);
       const lead = await ctx.db.get(e.to);
       if (!lead || lead.role !== "lead") continue;
-      unlocks.push({ id: lead._id, name: lead.name });
+      unlocks.push({ id: lead._id, name: lead.name, avatarUrl: lead.avatarUrl });
       if (unlocks.length === 12) break;
     }
     return {
       kind: "connector" as const,
       you,
-      connector: { id: person._id, name: person.name },
+      connector: { id: person._id, name: person.name, avatarUrl: person.avatarUrl },
       unlocks,
     };
   },
