@@ -9,26 +9,21 @@ import {
   SidebarHeader,
   SidebarItem,
 } from "@/components/ui/sidebar";
-import { WarmlineMark } from "@/components/warmline-mark";
+import { WarmlineLockup } from "@/components/warmline-mark";
 
-// App shell: the sidebar lives here so it's present on every authed page.
-// Hidden on the sign-in screen.
+// App shell: the sidebar lives here so it's present on every page.
+// Hidden on the onboarding screen.
 export default function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  if (pathname === "/signin" || pathname === "/onboarding") return <>{children}</>;
+  if (pathname === "/onboarding") return <>{children}</>;
 
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar className="shrink-0">
         <SidebarHeader>
-          <span className="flex items-center gap-2">
-            <WarmlineMark className="size-[22px] shrink-0" />
-            <span className="text-base font-semibold tracking-tight">
-              Warmline
-            </span>
-          </span>
+          <WarmlineLockup />
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
@@ -36,11 +31,6 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
               label="Feed"
               active={pathname === "/"}
               onClick={() => router.push("/")}
-            />
-            <SidebarItem
-              label="Sources"
-              active={pathname.startsWith("/connectors")}
-              onClick={() => router.push("/connectors")}
             />
           </SidebarGroup>
         </SidebarContent>
@@ -55,4 +45,3 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Schibsted_Grotesk } from "next/font/google";
 import "./globals.css";
-import { ConvexAuthNextjsServerProvider } from "@convex-dev/auth/nextjs/server";
 import ConvexClientProvider from "@/components/ConvexClientProvider";
 import AppChrome from "@/components/app-chrome";
 const geistSans = Geist({
@@ -14,10 +13,17 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Display / wordmark face. Brand spec: Schibsted Grotesk 600.
+const schibsted = Schibsted_Grotesk({
+  variable: "--font-schibsted",
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+});
+
 export const metadata: Metadata = {
   title: "Warmline",
   description:
-    "The For You feed for your warm network. Who to reach out to, why, and how.",
+    "The For You feed for your warm network. Who to reach out to, why, and how",
 };
 
 export default function RootLayout({
@@ -26,16 +32,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ConvexAuthNextjsServerProvider>
-      <html lang="en" className="dark">
-        <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background text-foreground`}
-        >
-          <ConvexClientProvider>
-            <AppChrome>{children}</AppChrome>
-          </ConvexClientProvider>
-        </body>
-      </html>
-    </ConvexAuthNextjsServerProvider>
+    <html lang="en" className="dark">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} ${schibsted.variable} font-sans antialiased min-h-screen bg-background text-foreground`}
+      >
+        <ConvexClientProvider>
+          <AppChrome>{children}</AppChrome>
+        </ConvexClientProvider>
+      </body>
+    </html>
   );
 }

@@ -37,7 +37,7 @@ import {
   XIcon,
 } from "@/components/icons/brand";
 import { cn } from "@/lib/utils";
-import { WarmlineMark } from "@/components/warmline-mark";
+import { WarmlineLockup } from "@/components/warmline-mark";
 import type { Provider } from "@/app/connectors/connectors-config";
 
 const PROCESSING_STEPS = [
@@ -155,9 +155,8 @@ export default function Onboarding() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-12">
       <div className={phase === "connect" ? "w-full max-w-2xl" : "w-full max-w-md"}>
-        <div className="mb-8 flex items-center gap-2.5">
-          <WarmlineMark className="size-7 shrink-0" />
-          <span className="text-base font-semibold tracking-tight">Warmline</span>
+        <div className="mb-8">
+          <WarmlineLockup markClassName="size-7" />
         </div>
 
         {phase === "product" && (
