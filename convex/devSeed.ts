@@ -1,14 +1,11 @@
-import {
-  internalAction,
-  internalMutation,
-  internalQuery,
-} from "./_generated/server";
-import { internal } from "./_generated/api";
+import { internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 
 // The public read-only demo reads this fixed account's network (Phase D). The
-// existing pre-multi-user seed rows are migrated onto it in Phase B.
+// pre-multi-user seed rows were migrated onto it in Phase B (the one-time
+// backfill ran against the deployment and was removed once userId narrowed
+// to required).
 export const DEMO_EMAIL = "demo@warmline.app";
 
 // Find or create the demo user account. Idempotent. Uses authTables' `email`
@@ -39,103 +36,6 @@ export const demoUserId = internalQuery({
       .withIndex("email", (q) => q.eq("email", DEMO_EMAIL))
       .first();
     return demo?._id ?? null;
-  },
-});
-
-type BackfillCounts = {
-  persons: number;
-  edges: number;
-  events: number;
-  attendance: number;
-  recommendations: number;
-  icp: number;
-};
-
-// Stamp a userId on every domain row that is missing one (the pre-multi-user
-// seed). One-time migration over a small seeded dataset; run before narrowing
-// userId to required.
-export const backfillToDemo = internalMutation({
-  args: { userId: v.id("users") },
-  returns: v.object({
-    persons: v.number(),
-    edges: v.number(),
-    events: v.number(),
-    attendance: v.number(),
-    recommendations: v.number(),
-    icp: v.number(),
-  }),
-  handler: async (ctx, { userId }): Promise<BackfillCounts> => {
-    const counts = {
-      persons: 0,
-      edges: 0,
-      events: 0,
-      attendance: 0,
-      recommendations: 0,
-      icp: 0,
-    };
-    for (const p of await ctx.db.query("persons").collect()) {
-      if (p.userId === undefined) {
-        await ctx.db.patch(p._id, { userId });
-        counts.persons++;
-      }
-    }
-    for (const e of await ctx.db.query("edges").collect()) {
-      if (e.userId === undefined) {
-        await ctx.db.patch(e._id, { userId });
-        counts.edges++;
-      }
-    }
-    for (const e of await ctx.db.query("events").collect()) {
-      if (e.userId === undefined) {
-        await ctx.db.patch(e._id, { userId });
-        counts.events++;
-      }
-    }
-    for (const a of await ctx.db.query("attendance").collect()) {
-      if (a.userId === undefined) {
-        await ctx.db.patch(a._id, { userId });
-        counts.attendance++;
-      }
-    }
-    for (const r of await ctx.db.query("recommendations").collect()) {
-      if (r.userId === undefined) {
-        await ctx.db.patch(r._id, { userId });
-        counts.recommendations++;
-      }
-    }
-    for (const i of await ctx.db.query("icp").collect()) {
-      if (i.userId === undefined) {
-        await ctx.db.patch(i._id, { userId });
-        counts.icp++;
-      }
-    }
-    return counts;
-  },
-});
-
-// One command to migrate the existing seed onto the demo account.
-// Run via `npx convex run devSeed:migrateSeedToDemo`.
-export const migrateSeedToDemo = internalAction({
-  args: {},
-  returns: v.object({
-    userId: v.id("users"),
-    persons: v.number(),
-    edges: v.number(),
-    events: v.number(),
-    attendance: v.number(),
-    recommendations: v.number(),
-    icp: v.number(),
-  }),
-  handler: async (ctx) => {
-    const userId: Id<"users"> = await ctx.runMutation(
-      internal.devSeed.getOrCreateDemoUser,
-      {},
-    );
-    const counts: BackfillCounts = await ctx.runMutation(
-      internal.devSeed.backfillToDemo,
-      { userId },
-    );
-    return { userId, ...counts };
   },
 });
 

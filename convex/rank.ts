@@ -49,7 +49,7 @@ export const rankData = internalQuery({
   handler: async (ctx, args) => {
     const icp = await ctx.db.get(args.icpId);
     // The icp row carries the owner; candidates come only from that user's graph.
-    if (!icp || icp.userId === undefined) return null;
+    if (!icp) return null;
     const owner = icp.userId;
     const leadDocs = await ctx.db
       .query("persons")
@@ -103,7 +103,7 @@ export const voteVectors = internalQuery({
     const up: number[][] = [];
     const down: number[][] = [];
     const icp = await ctx.db.get(args.icpId);
-    if (!icp || icp.userId === undefined) return { up, down };
+    if (!icp) return { up, down };
     const owner = icp.userId;
     const votes = await ctx.db
       .query("feedback")
@@ -158,7 +158,7 @@ export const connectorsForLead = internalQuery({
   ),
   handler: async (ctx, args) => {
     const lead = await ctx.db.get(args.leadId);
-    if (!lead || lead.userId === undefined) return [];
+    if (!lead) return [];
     const owner = lead.userId;
     const edges = await ctx.db
       .query("edges")
@@ -206,7 +206,7 @@ export const writeRecommendation = internalMutation({
     // Recommendations inherit the icp's owner; a person outside that owner's
     // graph can never be written into their feed.
     const icp = await ctx.db.get(args.icpId);
-    if (!icp || icp.userId === undefined) throw new Error("icp not found");
+    if (!icp) throw new Error("icp not found");
     const person = await ctx.db.get(args.personId);
     if (!person || person.userId !== icp.userId)
       throw new Error("person not found");

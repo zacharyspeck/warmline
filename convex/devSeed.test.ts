@@ -6,45 +6,6 @@ import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
 
-test("backfillToDemo stamps the demo userId on pre-multi-user rows", async () => {
-  const t = convexTest(schema, modules);
-  // Rows that predate multi-user (no userId — valid while the field is optional).
-  await t.run(async (ctx) => {
-    const p = await ctx.db.insert("persons", {
-      name: "Old Lead",
-      isSelf: false,
-      role: "lead",
-      relationshipToYou: "not_connected",
-    });
-    await ctx.db.insert("icp", { text: "Old goal", source: {} });
-    await ctx.db.insert("recommendations", {
-      personId: p,
-      icpId: await ctx.db.insert("icp", { text: "x", source: {} }),
-      kind: "lead",
-      score: 50,
-      whyBullets: [],
-      how: [],
-      opener: "",
-      unlocksIds: [],
-    });
-  });
-
-  const userId = await t.mutation(internal.devSeed.getOrCreateDemoUser, {});
-  const counts = await t.mutation(internal.devSeed.backfillToDemo, { userId });
-  expect(counts.persons).toBe(1);
-  expect(counts.icp).toBe(2);
-  expect(counts.recommendations).toBe(1);
-
-  // every row now belongs to the demo user
-  const persons = await t.run((ctx) => ctx.db.query("persons").collect());
-  expect(persons.every((p) => p.userId === userId)).toBe(true);
-
-  // idempotent: a second run stamps nothing
-  const again = await t.mutation(internal.devSeed.backfillToDemo, { userId });
-  expect(again.persons).toBe(0);
-  expect(again.icp).toBe(0);
-});
-
 test("seedNetwork produces a substantive, ranked-feed-ready network", async () => {
   const t = convexTest(schema, modules);
   const userId = await t.run(async (ctx) =>

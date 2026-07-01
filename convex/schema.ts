@@ -51,9 +51,9 @@ export default defineSchema({
 
   // Graph nodes — people (You, Leads, Connectors).
   persons: defineTable({
-    // Owner of this row. Optional during the widen step; narrowed to required
-    // once existing seed rows are backfilled to the demo account (Phase B).
-    userId: v.optional(v.id("users")),
+    // Owner of this row. Every domain row belongs to exactly one user; the
+    // pre-multi-user seed was backfilled to the demo account in Phase B.
+    userId: v.id("users"),
     name: v.string(),
     headline: v.optional(v.string()),
     company: v.optional(v.string()),
@@ -90,7 +90,7 @@ export default defineSchema({
 
   // Relationships (bridges). NOT co_attended_event — events are a channel, not a relationship.
   edges: defineTable({
-    userId: v.optional(v.id("users")),
+    userId: v.id("users"),
     from: v.id("persons"),
     to: v.id("persons"),
     type: v.union(
@@ -112,7 +112,7 @@ export default defineSchema({
 
   // "Go meet them" channel — not a who-knows-whom proxy.
   events: defineTable({
-    userId: v.optional(v.id("users")),
+    userId: v.id("users"),
     name: v.string(),
     date: v.optional(v.number()),
   })
@@ -122,7 +122,7 @@ export default defineSchema({
 
   // Join: person × event, carrying attendance-confidence ("will they actually be there").
   attendance: defineTable({
-    userId: v.optional(v.id("users")),
+    userId: v.id("users"),
     personId: v.id("persons"),
     eventId: v.id("events"),
     confidence: v.number(), // 0–1
@@ -134,7 +134,7 @@ export default defineSchema({
 
   // The feed rows — kept separate from the graph so ranking/why/how recomputes freely.
   recommendations: defineTable({
-    userId: v.optional(v.id("users")),
+    userId: v.id("users"),
     personId: v.id("persons"),
     icpId: v.id("icp"),
     kind: v.union(v.literal("lead"), v.literal("connector")),
@@ -155,7 +155,7 @@ export default defineSchema({
 
   // Who you sell to — derived from the product site; the vector thumbs nudge.
   icp: defineTable({
-    userId: v.optional(v.id("users")),
+    userId: v.id("users"),
     text: v.string(),
     vector: v.optional(v.array(v.number())), // OpenAI embedding
     source: v.object({

@@ -95,7 +95,7 @@ export const linkLeadEdges = internalMutation({
   returns: v.array(v.id("persons")),
   handler: async (ctx, args) => {
     const lead = await ctx.db.get(args.leadId);
-    if (!lead || !lead.company || lead.userId === undefined) return [];
+    if (!lead || !lead.company) return [];
     if (/^stealth/i.test(lead.company)) return [];
     const owner = lead.userId;
     // Bridge only within the lead's owner's graph. Pull more than we need, since
