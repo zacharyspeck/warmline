@@ -1,4 +1,4 @@
-import { internalMutation, action } from "./_generated/server";
+import { internalMutation, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { Id, Doc } from "./_generated/dataModel";
@@ -95,16 +95,14 @@ async function mergeImpl(
   const keep = await ctx.db.get(keepId);
   const drop = await ctx.db.get(dropId);
   if (!keep || !drop) throw new Error("merge: person not found");
+  // Two different users' rows must never fold into one graph.
+  if (keep.userId !== drop.userId)
+    throw new Error("merge: cross-user merge denied");
 
   const edges =
     (await drainEdgesFrom(ctx, dropId, keepId)) +
     (await drainEdgesTo(ctx, dropId, keepId));
-  const attendance = await drainPersonRef(
-    ctx,
-    "attendance",
-    dropId,
-    keepId,
-  );
+  const attendance = await drainPersonRef(ctx, "attendance", dropId, keepId);
   const recommendations = await drainPersonRef(
     ctx,
     "recommendations",
@@ -144,10 +142,11 @@ export const mergePersons = internalMutation({
   handler: (ctx, args) => mergeImpl(ctx, args.keepId, args.dropId),
 });
 
-// Given a resolved (handle → slug) pair: set the slug on the handle-person, and
-// merge into an existing slug-person if one exists (keep the canonical slug one).
+// Given a resolved (handle → slug) pair: set the slug on the OWNER's
+// handle-person, and merge into their existing slug-person if one exists (keep
+// the canonical slug one). Never looks outside the owner's graph.
 export const setLinkedinAndMaybeMerge = internalMutation({
-  args: { handle: v.string(), slug: v.string() },
+  args: { userId: v.id("users"), handle: v.string(), slug: v.string() },
   returns: v.object({
     action: v.union(
       v.literal("merged"),
@@ -158,13 +157,17 @@ export const setLinkedinAndMaybeMerge = internalMutation({
   handler: async (ctx, args) => {
     const handlePerson = await ctx.db
       .query("persons")
-      .withIndex("by_xHandle", (q) => q.eq("xHandle", args.handle))
+      .withIndex("by_user_and_xHandle", (q) =>
+        q.eq("userId", args.userId).eq("xHandle", args.handle),
+      )
       .first();
     if (!handlePerson) return { action: "noop" as const };
 
     const slugPerson = await ctx.db
       .query("persons")
-      .withIndex("by_linkedinUrl", (q) => q.eq("linkedinUrl", args.slug))
+      .withIndex("by_user_and_linkedinUrl", (q) =>
+        q.eq("userId", args.userId).eq("linkedinUrl", args.slug),
+      )
       .first();
 
     if (slugPerson && slugPerson._id !== handlePerson._id) {
@@ -176,10 +179,12 @@ export const setLinkedinAndMaybeMerge = internalMutation({
   },
 });
 
-// Fiber X→LinkedIn bridge. Pass the X-only handles to resolve (e.g. the hero set).
-// Needs FIBER_API_KEY in the Convex deployment env.
-export const resolveXHandles = action({
-  args: { handles: v.array(v.string()) },
+// Fiber X→LinkedIn bridge for ONE user's graph. Pass the X-only handles to
+// resolve (e.g. the hero set). Needs FIBER_API_KEY in the Convex deployment env.
+// Internal (dev tool): run via
+//   npx convex run resolve:resolveXHandles '{"userId":"...","handles":[...]}'
+export const resolveXHandles = internalAction({
+  args: { userId: v.id("users"), handles: v.array(v.string()) },
   returns: v.object({
     merged: v.number(),
     patched: v.number(),
@@ -214,7 +219,7 @@ export const resolveXHandles = action({
         }
         const r = await ctx.runMutation(
           internal.resolve.setLinkedinAndMaybeMerge,
-          { handle, slug },
+          { userId: args.userId, handle, slug },
         );
         if (r.action === "merged") merged++;
         else if (r.action === "patched") patched++;

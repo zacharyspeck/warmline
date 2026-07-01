@@ -1,6 +1,6 @@
-import { query } from "./_generated/server";
+import { internalQuery, query } from "./_generated/server";
 import { v } from "convex/values";
-import { Doc } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
 import { QueryCtx } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { initials, confLabel, reachability, introScore } from "./lib";
@@ -62,7 +62,8 @@ async function warmPathFor(
       if (!c || c.isSelf) continue;
       const score = introScore(c.tieStrength ?? 0, e.confidence);
       const prev = best.get(e.from);
-      if (!prev || score > prev.score) best.set(e.from, { name: c.name, score });
+      if (!prev || score > prev.score)
+        best.set(e.from, { name: c.name, score });
     }
   } else {
     const edges = await ctx.db
@@ -152,103 +153,120 @@ async function connectorHow(
   ];
 }
 
+// The feed for one explicit owner. Shared by the public query (owner = caller)
+// and the internal per-user paths (cron avatar enrichment).
+async function feedForUser(ctx: QueryCtx, userId: Id<"users">, limit: number) {
+  const icp = await ctx.db
+    .query("icp")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .order("desc")
+    .first();
+  const pre: Pre[] = [];
+
+  // Lead rows: prefer ranked recommendations; else a reachability heuristic.
+  const recs = icp
+    ? await ctx.db
+        .query("recommendations")
+        .withIndex("by_icp_and_score", (q) => q.eq("icpId", icp._id))
+        .order("desc")
+        .take(limit * 2)
+    : [];
+  if (recs.length > 0) {
+    for (const r of recs) {
+      const p = await ctx.db.get(r.personId);
+      if (!p || p.isSelf) continue;
+      pre.push({
+        p,
+        score: Math.round(r.score),
+        why: r.whyBullets.map((w) => ({
+          text: w.text,
+          confidence: confLabel(w.confidence),
+        })),
+        how: r.how.filter(Boolean),
+        opener: r.opener,
+      });
+    }
+  } else {
+    const leads = await ctx.db
+      .query("persons")
+      .withIndex("by_user_and_role", (q) =>
+        q.eq("userId", userId).eq("role", "lead"),
+      )
+      .take(400);
+    for (const p of leads) {
+      if (p.isSelf) continue;
+      const h = heuristicRow(p);
+      pre.push({ p, score: h.score, why: h.why, how: heuristicHow(p) });
+    }
+  }
+
+  // Connector rows ALWAYS appear (the "befriend a connector" mode). Top by unlockValue.
+  const seen = new Set(pre.map((x) => x.p._id));
+  const connectorDocs = await ctx.db
+    .query("persons")
+    .withIndex("by_user_and_role", (q) =>
+      q.eq("userId", userId).eq("role", "connector"),
+    )
+    .take(400);
+  const topConnectors = connectorDocs
+    .filter((c) => !c.isSelf && (c.unlockValue ?? 0) > 0 && !seen.has(c._id))
+    .sort((a, b) => (b.unlockValue ?? 0) - (a.unlockValue ?? 0))
+    .slice(0, Math.max(5, Math.floor(limit / 3)));
+  for (const c of topConnectors) {
+    const h = heuristicRow(c);
+    pre.push({
+      p: c,
+      score: h.score,
+      why: h.why,
+      how: await connectorHow(ctx, c),
+    });
+  }
+
+  // Sort, slice, and compute mutuals ONLY for the returned rows (bounds reads).
+  pre.sort((a, b) => b.score - a.score);
+  const rows = [];
+  for (const x of pre.slice(0, limit)) {
+    const p = x.p;
+    const warmPath = await warmPathFor(ctx, p);
+    rows.push({
+      id: p._id,
+      kind: p.role,
+      gatekeeper: (p.unlockValue ?? 0) >= GATEKEEPER_MIN,
+      name: p.name,
+      initials: initials(p.name),
+      company: p.company ?? "",
+      role: p.headline ?? "",
+      avatarUrl: p.avatarUrl,
+      linkedinUrl: p.linkedinUrl,
+      xHandle: p.xHandle,
+      score: x.score,
+      tieStrength: Math.round(100 * (p.tieStrength ?? 0)),
+      unlocks: p.role === "connector" ? p.unlockValue : undefined,
+      why: x.why,
+      mutuals: warmPath.people,
+      mutualsTotal: warmPath.total,
+      how: x.how,
+      opener: x.opener,
+    });
+  }
+  return rows;
+}
+
 export const list = query({
   args: { limit: v.optional(v.number()) },
   returns: v.array(feedRow),
   handler: async (ctx, args) => {
-    const limit = args.limit ?? 25;
     // Per-user feed: signed-out callers get nothing (the Phase D demo reads the
     // demo account through a dedicated path, never this one).
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
-    const icp = await ctx.db
-      .query("icp")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .order("desc")
-      .first();
-    const pre: Pre[] = [];
-
-    // Lead rows: prefer ranked recommendations; else a reachability heuristic.
-    const recs = icp
-      ? await ctx.db
-          .query("recommendations")
-          .withIndex("by_icp_and_score", (q) => q.eq("icpId", icp._id))
-          .order("desc")
-          .take(limit * 2)
-      : [];
-    if (recs.length > 0) {
-      for (const r of recs) {
-        const p = await ctx.db.get(r.personId);
-        if (!p || p.isSelf) continue;
-        pre.push({
-          p,
-          score: Math.round(r.score),
-          why: r.whyBullets.map((w) => ({
-            text: w.text,
-            confidence: confLabel(w.confidence),
-          })),
-          how: r.how.filter(Boolean),
-          opener: r.opener,
-        });
-      }
-    } else {
-      const leads = await ctx.db
-        .query("persons")
-        .withIndex("by_user_and_role", (q) =>
-          q.eq("userId", userId).eq("role", "lead"),
-        )
-        .take(400);
-      for (const p of leads) {
-        if (p.isSelf) continue;
-        const h = heuristicRow(p);
-        pre.push({ p, score: h.score, why: h.why, how: heuristicHow(p) });
-      }
-    }
-
-    // Connector rows ALWAYS appear (the "befriend a connector" mode). Top by unlockValue.
-    const seen = new Set(pre.map((x) => x.p._id));
-    const connectorDocs = await ctx.db
-      .query("persons")
-      .withIndex("by_user_and_role", (q) =>
-        q.eq("userId", userId).eq("role", "connector"),
-      )
-      .take(400);
-    const topConnectors = connectorDocs
-      .filter((c) => !c.isSelf && (c.unlockValue ?? 0) > 0 && !seen.has(c._id))
-      .sort((a, b) => (b.unlockValue ?? 0) - (a.unlockValue ?? 0))
-      .slice(0, Math.max(5, Math.floor(limit / 3)));
-    for (const c of topConnectors) {
-      const h = heuristicRow(c);
-      pre.push({ p: c, score: h.score, why: h.why, how: await connectorHow(ctx, c) });
-    }
-
-    // Sort, slice, and compute mutuals ONLY for the returned rows (bounds reads).
-    pre.sort((a, b) => b.score - a.score);
-    const rows = [];
-    for (const x of pre.slice(0, limit)) {
-      const p = x.p;
-      const warmPath = await warmPathFor(ctx, p);
-      rows.push({
-        id: p._id,
-        kind: p.role,
-        gatekeeper: (p.unlockValue ?? 0) >= GATEKEEPER_MIN,
-        name: p.name,
-        initials: initials(p.name),
-        company: p.company ?? "",
-        role: p.headline ?? "",
-        avatarUrl: p.avatarUrl,
-        linkedinUrl: p.linkedinUrl,
-        xHandle: p.xHandle,
-        score: x.score,
-        tieStrength: Math.round(100 * (p.tieStrength ?? 0)),
-        unlocks: p.role === "connector" ? p.unlockValue : undefined,
-        why: x.why,
-        mutuals: warmPath.people,
-        mutualsTotal: warmPath.total,
-        how: x.how,
-        opener: x.opener,
-      });
-    }
-    return rows;
+    return await feedForUser(ctx, userId, args.limit ?? 25);
   },
+});
+
+export const listForUser = internalQuery({
+  args: { userId: v.id("users"), limit: v.optional(v.number()) },
+  returns: v.array(feedRow),
+  handler: async (ctx, args) =>
+    await feedForUser(ctx, args.userId, args.limit ?? 25),
 });

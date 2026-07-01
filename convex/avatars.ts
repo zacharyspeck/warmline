@@ -4,7 +4,7 @@ import {
   internalQuery,
   type ActionCtx,
 } from "./_generated/server";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 
@@ -79,7 +79,7 @@ function findProfilePic(obj: unknown, depth = 0): string | undefined {
 }
 
 export const needingAvatars = internalQuery({
-  args: { limit: v.number() },
+  args: { userId: v.id("users"), limit: v.number() },
   returns: v.array(
     v.object({
       id: v.id("persons"),
@@ -90,11 +90,15 @@ export const needingAvatars = internalQuery({
   handler: async (ctx, args) => {
     const leads = await ctx.db
       .query("persons")
-      .withIndex("by_role", (q) => q.eq("role", "lead"))
+      .withIndex("by_user_and_role", (q) =>
+        q.eq("userId", args.userId).eq("role", "lead"),
+      )
       .take(400);
     const connectors = await ctx.db
       .query("persons")
-      .withIndex("by_role", (q) => q.eq("role", "connector"))
+      .withIndex("by_user_and_role", (q) =>
+        q.eq("userId", args.userId).eq("role", "connector"),
+      )
       .take(400);
     // Include self; anyone with a LinkedIn slug OR an X handle can be resolved.
     return [...leads, ...connectors]
@@ -106,9 +110,15 @@ export const needingAvatars = internalQuery({
 });
 
 export const setAvatar = internalMutation({
-  args: { personId: v.id("persons"), url: v.string() },
+  args: {
+    personId: v.id("persons"),
+    userId: v.id("users"),
+    url: v.string(),
+  },
   returns: v.null(),
   handler: async (ctx, args) => {
+    const p = await ctx.db.get(args.personId);
+    if (!p || p.userId !== args.userId) throw new Error("Person not found");
     await ctx.db.patch(args.personId, { avatarUrl: args.url });
     return null;
   },
@@ -118,6 +128,7 @@ export const setAvatar = internalMutation({
 async function storeAvatar(
   ctx: ActionCtx,
   apiKey: string | undefined,
+  userId: Id<"users">,
   personId: Id<"persons">,
   slug?: string,
   xHandle?: string,
@@ -130,19 +141,27 @@ async function storeAvatar(
     const storageId = await ctx.storage.store(await img.blob());
     const url = await ctx.storage.getUrl(storageId);
     if (!url) return false;
-    await ctx.runMutation(internal.avatars.setAvatar, { personId, url });
+    await ctx.runMutation(internal.avatars.setAvatar, {
+      personId,
+      userId,
+      url,
+    });
     return true;
   } catch {
     return false;
   }
 }
 
-// Enrich the top people by tie strength. Runs on the daily cron and by hand via
-// `npx convex run avatars:enrichTop`. Uses Fiber when FIBER_API_KEY is set, else
-// unavatar; a missing key degrades instead of throwing.
+// Enrich one user's top people by tie strength. Runs per user on the daily cron
+// and by hand via `npx convex run avatars:enrichTop`. Uses Fiber when
+// FIBER_API_KEY is set, else unavatar; a missing key degrades instead of throwing.
 export const enrichTop = internalAction({
-  args: { limit: v.optional(v.number()) },
-  returns: v.object({ done: v.number(), failed: v.number(), keyed: v.boolean() }),
+  args: { userId: v.id("users"), limit: v.optional(v.number()) },
+  returns: v.object({
+    done: v.number(),
+    failed: v.number(),
+    keyed: v.boolean(),
+  }),
   handler: async (ctx, args) => {
     const apiKey = process.env.FIBER_API_KEY;
     const targets: {
@@ -150,31 +169,50 @@ export const enrichTop = internalAction({
       slug?: string;
       xHandle?: string;
     }[] = await ctx.runQuery(internal.avatars.needingAvatars, {
+      userId: args.userId,
       limit: args.limit ?? 40,
     });
     let done = 0;
     let failed = 0;
     for (const t of targets) {
-      if (await storeAvatar(ctx, apiKey, t.id, t.slug, t.xHandle)) done++;
+      if (await storeAvatar(ctx, apiKey, args.userId, t.id, t.slug, t.xHandle))
+        done++;
       else failed++;
     }
     return { done, failed, keyed: !!apiKey };
   },
 });
 
-// Enrich exactly the people currently in the feed (targets the visible rows,
-// not top-by-tie). Run via `npx convex run avatars:enrichFeed`.
+// Enrich exactly the people currently in one user's feed (targets the visible
+// rows, not top-by-tie). Run via `npx convex run avatars:enrichFeed`.
 export const enrichFeed = internalAction({
-  args: {},
-  returns: v.object({ done: v.number(), failed: v.number(), keyed: v.boolean() }),
-  handler: async (ctx) => {
+  args: { userId: v.id("users") },
+  returns: v.object({
+    done: v.number(),
+    failed: v.number(),
+    keyed: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
     const apiKey = process.env.FIBER_API_KEY;
-    const rows = await ctx.runQuery(api.feed.list, { limit: 40 });
+    const rows = await ctx.runQuery(internal.feed.listForUser, {
+      userId: args.userId,
+      limit: 40,
+    });
     let done = 0;
     let failed = 0;
     for (const r of rows) {
       if (r.avatarUrl) continue;
-      if (await storeAvatar(ctx, apiKey, r.id, r.linkedinUrl, r.xHandle)) done++;
+      if (
+        await storeAvatar(
+          ctx,
+          apiKey,
+          args.userId,
+          r.id,
+          r.linkedinUrl,
+          r.xHandle,
+        )
+      )
+        done++;
       else failed++;
     }
     return { done, failed, keyed: !!apiKey };

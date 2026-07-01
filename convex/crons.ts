@@ -1,22 +1,78 @@
-import { cronJobs } from "convex/server";
+import { cronJobs, paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
-import { api, internal } from "./_generated/api";
-import { internalAction } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { internalAction, internalQuery } from "./_generated/server";
+import { Id } from "./_generated/dataModel";
 
-// Daily proactive run: recompute bridges, re-rank the latest ICP, then refresh
-// avatars for the top people. Avatar enrichment is best-effort — network hiccups
-// or a missing FIBER_API_KEY must never fail the daily refresh.
+export const userIdPage = internalQuery({
+  args: { paginationOpts: paginationOptsValidator },
+  returns: v.object({
+    ids: v.array(v.id("users")),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    const page = await ctx.db.query("users").paginate(args.paginationOpts);
+    return {
+      ids: page.page.map((u) => u._id),
+      isDone: page.isDone,
+      continueCursor: page.continueCursor,
+    };
+  },
+});
+
+// One user's daily refresh: recompute bridges, re-rank the latest ICP, refresh
+// avatars for the top people. Each step is best-effort in its OWN try/catch —
+// a missing OpenAI key or a bad rank must never take the (cosmetic but visible)
+// avatar refresh down with it.
+export const refreshOneUser = internalAction({
+  args: { userId: v.id("users") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const { userId } = args;
+    try {
+      await ctx.runAction(internal.edges.computeEdges, { userId });
+    } catch (err) {
+      console.error(`refreshOneUser: computeEdges failed for ${userId}`, err);
+    }
+    try {
+      const icp = await ctx.runQuery(internal.icp.latestForUser, { userId });
+      if (icp) await ctx.runAction(internal.rank.rebuild, { icpId: icp._id });
+    } catch (err) {
+      console.error(`refreshOneUser: rank failed for ${userId}`, err);
+    }
+    try {
+      await ctx.runAction(internal.avatars.enrichTop, { userId, limit: 24 });
+    } catch {
+      /* avatars are cosmetic; never block the refresh */
+    }
+    return null;
+  },
+});
+
+// Daily proactive run: schedule an independent refresh per user. Fan-out keeps
+// each user inside their own action time budget (a serial loop would hit the
+// 10-minute action cap and silently starve everyone after the cutoff).
 export const dailyRefresh = internalAction({
   args: {},
   returns: v.null(),
   handler: async (ctx) => {
-    await ctx.runAction(internal.edges.computeEdges, {});
-    const icp = await ctx.runQuery(api.icp.latest, {});
-    if (icp) await ctx.runAction(internal.rank.rebuild, { icpId: icp._id });
-    try {
-      await ctx.runAction(internal.avatars.enrichTop, { limit: 24 });
-    } catch {
-      /* avatars are cosmetic; never block the refresh */
+    let cursor: string | null = null;
+    for (;;) {
+      const page: {
+        ids: Id<"users">[];
+        isDone: boolean;
+        continueCursor: string;
+      } = await ctx.runQuery(internal.crons.userIdPage, {
+        paginationOpts: { numItems: 100, cursor },
+      });
+      for (const userId of page.ids) {
+        await ctx.scheduler.runAfter(0, internal.crons.refreshOneUser, {
+          userId,
+        });
+      }
+      if (page.isDone) break;
+      cursor = page.continueCursor;
     }
     return null;
   },

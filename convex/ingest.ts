@@ -2,27 +2,34 @@ import { mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx } from "./_generated/server";
+import { requireUser } from "./authz";
 
-// Seed ingest. Called by scripts/seed.mjs (local, PII stays on disk).
-// Public mutations so the local Convex client can reach them — keep this
-// deployment private / wipe before any real users.
+// Ingest for the CALLER's own graph. Every mutation requires a signed-in user
+// and stamps their userId on each row, so unauthenticated or cross-user bulk
+// writes are impossible. (scripts/seed.mjs predates auth and can no longer call
+// these — the in-app LinkedIn upload is the real ingest path.)
 
 async function findPerson(
   ctx: MutationCtx,
+  userId: Id<"users">,
   linkedinUrl?: string,
   xHandle?: string,
 ): Promise<Doc<"persons"> | null> {
   if (linkedinUrl) {
     const p = await ctx.db
       .query("persons")
-      .withIndex("by_linkedinUrl", (q) => q.eq("linkedinUrl", linkedinUrl))
+      .withIndex("by_user_and_linkedinUrl", (q) =>
+        q.eq("userId", userId).eq("linkedinUrl", linkedinUrl),
+      )
       .first();
     if (p) return p;
   }
   if (xHandle) {
     const p = await ctx.db
       .query("persons")
-      .withIndex("by_xHandle", (q) => q.eq("xHandle", xHandle))
+      .withIndex("by_user_and_xHandle", (q) =>
+        q.eq("userId", userId).eq("xHandle", xHandle),
+      )
       .first();
     if (p) return p;
   }
@@ -50,12 +57,19 @@ export const ingestSelf = mutation({
   },
   returns: v.id("persons"),
   handler: async (ctx, args) => {
-    const existing = await findPerson(ctx, args.linkedinUrl, args.xHandle);
+    const userId = await requireUser(ctx);
+    const existing = await findPerson(
+      ctx,
+      userId,
+      args.linkedinUrl,
+      args.xHandle,
+    );
     if (existing) {
       await ctx.db.patch(existing._id, { isSelf: true });
       return existing._id;
     }
     return await ctx.db.insert("persons", {
+      userId,
       name: args.name,
       linkedinUrl: args.linkedinUrl,
       xHandle: args.xHandle,
@@ -80,10 +94,16 @@ export const ingestConnections = mutation({
   args: { rows: v.array(connectionRow) },
   returns: v.object({ inserted: v.number(), patched: v.number() }),
   handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
     let inserted = 0;
     let patched = 0;
     for (const row of args.rows) {
-      const existing = await findPerson(ctx, row.linkedinUrl, row.xHandle);
+      const existing = await findPerson(
+        ctx,
+        userId,
+        row.linkedinUrl,
+        row.xHandle,
+      );
       if (existing) {
         const patch = fillMissing(existing, {
           headline: row.headline,
@@ -98,6 +118,7 @@ export const ingestConnections = mutation({
         patched++;
       } else {
         await ctx.db.insert("persons", {
+          userId,
           name: row.name,
           headline: row.headline,
           company: row.company,
@@ -126,15 +147,18 @@ const leadRow = v.object({
 
 async function upsertEvent(
   ctx: MutationCtx,
+  userId: Id<"users">,
   name: string,
   date?: number,
 ): Promise<Id<"events">> {
   const existing = await ctx.db
     .query("events")
-    .withIndex("by_name", (q) => q.eq("name", name))
+    .withIndex("by_user_and_name", (q) =>
+      q.eq("userId", userId).eq("name", name),
+    )
     .first();
   if (existing) return existing._id;
-  return await ctx.db.insert("events", { name, date });
+  return await ctx.db.insert("events", { userId, name, date });
 }
 
 // Config Leads rows → role lead. If already a connection, keep connected + promote to lead.
@@ -142,10 +166,16 @@ export const ingestLeads = mutation({
   args: { rows: v.array(leadRow) },
   returns: v.object({ leads: v.number(), attendances: v.number() }),
   handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
     let leads = 0;
     let attendances = 0;
     for (const row of args.rows) {
-      const existing = await findPerson(ctx, row.linkedinUrl, row.xHandle);
+      const existing = await findPerson(
+        ctx,
+        userId,
+        row.linkedinUrl,
+        row.xHandle,
+      );
       let personId: Id<"persons">;
       if (existing) {
         // A lead you already know (the verified overlaps). Promote to lead, keep connected.
@@ -153,6 +183,7 @@ export const ingestLeads = mutation({
         personId = existing._id;
       } else {
         personId = await ctx.db.insert("persons", {
+          userId,
           name: row.name,
           linkedinUrl: row.linkedinUrl,
           xHandle: row.xHandle,
@@ -164,7 +195,12 @@ export const ingestLeads = mutation({
       leads++;
 
       if (row.eventName) {
-        const eventId = await upsertEvent(ctx, row.eventName, row.eventDate);
+        const eventId = await upsertEvent(
+          ctx,
+          userId,
+          row.eventName,
+          row.eventDate,
+        );
         const already = await ctx.db
           .query("attendance")
           .withIndex("by_person_and_event", (q) =>
@@ -173,6 +209,7 @@ export const ingestLeads = mutation({
           .first();
         if (!already) {
           await ctx.db.insert("attendance", {
+            userId,
             personId,
             eventId,
             confidence: row.confidence ?? 1,
@@ -185,23 +222,41 @@ export const ingestLeads = mutation({
   },
 });
 
-// Dev reset — delete one bounded batch across the Warmline tables; the loader
-// calls this in a loop until it returns 0. Keeps each call within transaction limits.
+// Dev reset — delete one bounded batch of the CALLER's rows across the Warmline
+// tables; call in a loop until it returns 0. Feedback rows carry no userId, so
+// they are reached through the caller's icps and cleared before persons go.
 export const clearBatch = mutation({
   args: {},
   returns: v.object({ deleted: v.number() }),
   handler: async (ctx) => {
+    const userId = await requireUser(ctx);
     let deleted = 0;
+    const icps = await ctx.db
+      .query("icp")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .take(50);
+    for (const icp of icps) {
+      const votes = await ctx.db
+        .query("feedback")
+        .withIndex("by_icp", (q) => q.eq("icpId", icp._id))
+        .take(300);
+      for (const f of votes) {
+        await ctx.db.delete(f._id);
+        deleted++;
+      }
+    }
     const tables = [
-      "persons",
+      "recommendations",
+      "attendance",
       "edges",
       "events",
-      "attendance",
-      "recommendations",
-      "feedback",
+      "persons",
     ] as const;
     for (const table of tables) {
-      const rows = await ctx.db.query(table).take(300);
+      const rows = await ctx.db
+        .query(table)
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .take(300);
       for (const r of rows) {
         await ctx.db.delete(r._id);
         deleted++;

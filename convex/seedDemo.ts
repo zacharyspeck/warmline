@@ -1,13 +1,16 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
+import { DEMO_EMAIL } from "./devSeed";
 
 // Local demo-data loader. Maps seed/demo-data.json (the `zach/demo-data` contract)
 // into main's real Convex schema in ONE atomic pass, so the feed renders locally
-// with no OpenAI key. Public (like convex/ingest.ts) so the local Convex client in
-// scripts/loadDemo.mjs can reach it — keep this deployment private.
+// with no OpenAI key. Public so the local Convex client in scripts/loadDemo.mjs
+// can reach it, but it can ONLY touch the demo account: every row is stamped with
+// the demo user's id and the wipe is scoped to that user, so real accounts are
+// unreachable from this path.
 //
-// Idempotent: clears the Warmline DOMAIN tables first (auth / users are NEVER
+// Idempotent: clears the demo user's DOMAIN rows first (auth / users are NEVER
 // touched), so re-running re-seeds cleanly instead of duplicating.
 
 // Shape of the demo JSON (seed/demo-data.json). Loosely typed — every field is
@@ -58,7 +61,12 @@ type DemoData = {
 
 // Demo `roles[]` tags that become a `connector` in the app's 2-role model;
 // everything else (fanout / judge / go_cold) becomes a `lead`.
-const CONNECTOR_ROLES = new Set(["self", "gatekeeper", "judge_bridge", "support"]);
+const CONNECTOR_ROLES = new Set([
+  "self",
+  "gatekeeper",
+  "judge_bridge",
+  "support",
+]);
 
 // The app stores a LinkedIn *slug* (the UI rebuilds the full URL), but the demo
 // stores full URLs — strip "https://linkedin.com/in/handotdev" → "handotdev".
@@ -88,22 +96,53 @@ export const loadDemo = mutation({
     // people + judge_kicker edges are dropped; the 12-wide hero path stays intact.
     const includeJudge = d.flags?.include_judge_edges !== false;
 
-    // ── 1. Clear Warmline domain tables (auth `users`, `numbers`, `connectors` untouched) ──
-    const domainTables = [
+    // ── 0. Resolve the demo account — the only owner this loader may touch ──
+    const demo = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", DEMO_EMAIL))
+      .first();
+    const userId =
+      demo?._id ??
+      (await ctx.db.insert("users", {
+        email: DEMO_EMAIL,
+        name: "Warmline Demo",
+      }));
+
+    // ── 1. Clear the demo user's domain rows (other users, auth `users`,
+    //       `numbers`, `connectors` untouched). personVectors/feedback carry no
+    //       userId, so they are reached per owned person through by_person —
+    //       never by scanning other users' rows. ──
+    const owned = await ctx.db
+      .query("persons")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    for (const p of owned) {
+      const vectors = await ctx.db
+        .query("personVectors")
+        .withIndex("by_person", (q) => q.eq("personId", p._id))
+        .collect();
+      for (const pv of vectors) await ctx.db.delete(pv._id);
+      const votes = await ctx.db
+        .query("feedback")
+        .withIndex("by_person", (q) => q.eq("personId", p._id))
+        .collect();
+      for (const fb of votes) await ctx.db.delete(fb._id);
+    }
+    const byUserTables = [
       "recommendations",
-      "feedback",
       "attendance",
       "edges",
-      "personVectors",
-      "persons",
       "events",
       "icp",
     ] as const;
-    for (const table of domainTables) {
-      for (const row of await ctx.db.query(table).collect()) {
-        await ctx.db.delete(row._id);
-      }
+    for (const table of byUserTables) {
+      const rows = await ctx.db
+        .query(table)
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .collect();
+      for (const row of rows) await ctx.db.delete(row._id);
     }
+    for (const p of owned) await ctx.db.delete(p._id);
 
     // ── 2. Precompute derived fields the demo doesn't store ──
     // (a) who is directly connected to you = has a self→X 1st-degree edge.
@@ -142,6 +181,7 @@ export const loadDemo = mutation({
         if (!unlockValue) unlockValue = undefined; // omit 0/undefined
       }
       const _id = await ctx.db.insert("persons", {
+        userId,
         name: p.name,
         headline: p.headline ?? undefined,
         company: p.company ?? undefined,
@@ -161,6 +201,7 @@ export const loadDemo = mutation({
     let events = 0;
     for (const ev of d.events ?? []) {
       const _id = await ctx.db.insert("events", {
+        userId,
         name: ev.name,
         ...(typeof ev.date === "number" ? { date: ev.date } : {}),
       });
@@ -174,7 +215,12 @@ export const loadDemo = mutation({
       for (const slug of ev.attendee_ids ?? []) {
         const personId = idBySlug.get(slug);
         if (!personId) continue; // judge person skipped when toggle off
-        await ctx.db.insert("attendance", { personId, eventId, confidence: 1 });
+        await ctx.db.insert("attendance", {
+          userId,
+          personId,
+          eventId,
+          confidence: 1,
+        });
         attendance++;
       }
     }
@@ -191,6 +237,7 @@ export const loadDemo = mutation({
       const to = idBySlug.get(e.to_id);
       if (!from || !to) continue; // a judge endpoint skipped when toggle off
       await ctx.db.insert("edges", {
+        userId,
         from,
         to,
         // The app's edge enum has no `co_attended_event`; no read path reads `type`
@@ -205,7 +252,11 @@ export const loadDemo = mutation({
 
     // ── 6. Goal → icp (REQUIRED — without it the app redirects to /onboarding) ──
     const goal = (d.goals ?? [])[0] ?? { text: "Break into SF dev tools" };
-    const icpId = await ctx.db.insert("icp", { text: goal.text, source: {} });
+    const icpId = await ctx.db.insert("icp", {
+      userId,
+      text: goal.text,
+      source: {},
+    });
 
     // ── 7. Recommendations → recommendations (the 2 hero cards) ──
     let recommendations = 0;
@@ -219,6 +270,7 @@ export const loadDemo = mutation({
         .map((s) => idBySlug.get(s))
         .filter((x): x is Id<"persons"> => !!x);
       await ctx.db.insert("recommendations", {
+        userId,
         personId,
         icpId,
         kind: r.type === "gatekeeper" ? "connector" : "lead",

@@ -77,6 +77,20 @@ export const embedIcp = action({
   },
 });
 
+// The cron's per-user entry point: the newest icp for an explicit owner.
+export const latestForUser = internalQuery({
+  args: { userId: v.id("users") },
+  returns: v.union(v.object({ _id: v.id("icp") }), v.null()),
+  handler: async (ctx, args) => {
+    const icp = await ctx.db
+      .query("icp")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .order("desc")
+      .first();
+    return icp ? { _id: icp._id } : null;
+  },
+});
+
 export const latest = query({
   args: {},
   returns: v.union(

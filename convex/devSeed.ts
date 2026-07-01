@@ -1,4 +1,8 @@
-import { internalAction, internalMutation } from "./_generated/server";
+import {
+  internalAction,
+  internalMutation,
+  internalQuery,
+} from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
@@ -7,18 +11,34 @@ import { Id } from "./_generated/dataModel";
 // existing pre-multi-user seed rows are migrated onto it in Phase B.
 export const DEMO_EMAIL = "demo@warmline.app";
 
-// Find or create the demo user account. Idempotent.
+// Find or create the demo user account. Idempotent. Uses authTables' `email`
+// index — a bounded scan would silently miss the demo row past the bound.
 export const getOrCreateDemoUser = internalMutation({
   args: {},
   returns: v.id("users"),
   handler: async (ctx) => {
-    const users = await ctx.db.query("users").take(1000);
-    const existing = users.find((u) => u.email === DEMO_EMAIL);
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", DEMO_EMAIL))
+      .first();
     if (existing) return existing._id;
     return await ctx.db.insert("users", {
       email: DEMO_EMAIL,
       name: "Warmline Demo",
     });
+  },
+});
+
+// Read-only demo-account lookup (the GET extension route must not create users).
+export const demoUserId = internalQuery({
+  args: {},
+  returns: v.union(v.id("users"), v.null()),
+  handler: async (ctx) => {
+    const demo = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", DEMO_EMAIL))
+      .first();
+    return demo?._id ?? null;
   },
 });
 
@@ -167,14 +187,28 @@ export const markSourcesConnected = internalMutation({
   args: { email: v.string() },
   returns: v.object({ inserted: v.number(), userId: v.string() }),
   handler: async (ctx, args) => {
-    const users = await ctx.db.query("users").take(200);
-    const user = users.find((u) => u.email === args.email);
+    const user = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", args.email))
+      .first();
     if (!user) throw new Error(`no user with email ${args.email}`);
 
     const sources = [
-      { provider: "linkedin" as const, method: "manual" as const, label: "LinkedIn data" },
-      { provider: "twitter" as const, method: "manual" as const, label: "X data" },
-      { provider: "extension" as const, method: "extension" as const, label: "Chrome extension" },
+      {
+        provider: "linkedin" as const,
+        method: "manual" as const,
+        label: "LinkedIn data",
+      },
+      {
+        provider: "twitter" as const,
+        method: "manual" as const,
+        label: "X data",
+      },
+      {
+        provider: "extension" as const,
+        method: "extension" as const,
+        label: "Chrome extension",
+      },
     ];
     let inserted = 0;
     for (const s of sources) {
@@ -206,35 +240,88 @@ export const markSourcesConnected = internalMutation({
 // Run via `npx convex run devSeed:seedNetwork`.
 
 const FIRST = [
-  "Ava", "Noah", "Mia", "Leo", "Zoe", "Kai", "Ivy", "Ravi", "Nora", "Theo",
-  "Lena", "Omar", "Sara", "Ben", "Priya", "Marco", "Anya", "Diego", "Iris", "Sam",
+  "Ava",
+  "Noah",
+  "Mia",
+  "Leo",
+  "Zoe",
+  "Kai",
+  "Ivy",
+  "Ravi",
+  "Nora",
+  "Theo",
+  "Lena",
+  "Omar",
+  "Sara",
+  "Ben",
+  "Priya",
+  "Marco",
+  "Anya",
+  "Diego",
+  "Iris",
+  "Sam",
 ];
 const LAST = [
-  "Reyes", "Okafor", "Nakamura", "Bauer", "Silva", "Haddad", "Nguyen", "Costa",
-  "Larsson", "Mehta", "Rossi", "Abara", "Kimura", "Novak", "Duarte", "Falk",
+  "Reyes",
+  "Okafor",
+  "Nakamura",
+  "Bauer",
+  "Silva",
+  "Haddad",
+  "Nguyen",
+  "Costa",
+  "Larsson",
+  "Mehta",
+  "Rossi",
+  "Abara",
+  "Kimura",
+  "Novak",
+  "Duarte",
+  "Falk",
 ];
 const COMPANIES = [
-  "Stripe", "Notion", "Linear", "Vercel", "Ramp", "Figma", "Retool", "Airtable",
-  "Amplitude", "Segment", "Datadog", "Snowflake", "Supabase", "Render",
+  "Stripe",
+  "Notion",
+  "Linear",
+  "Vercel",
+  "Ramp",
+  "Figma",
+  "Retool",
+  "Airtable",
+  "Amplitude",
+  "Segment",
+  "Datadog",
+  "Snowflake",
+  "Supabase",
+  "Render",
 ];
 const LEAD_ROLES = [
-  "Head of Growth", "Founder", "VP Engineering", "Product Lead", "GTM Lead",
-  "Head of Marketing", "Founding Engineer", "Head of Sales",
+  "Head of Growth",
+  "Founder",
+  "VP Engineering",
+  "Product Lead",
+  "GTM Lead",
+  "Head of Marketing",
+  "Founding Engineer",
+  "Head of Sales",
 ];
 const CONNECTOR_TITLES = [
-  "Investor", "Community Lead", "Developer Advocate", "Chief of Staff",
-  "Ex-colleague", "Event Organizer",
+  "Investor",
+  "Community Lead",
+  "Developer Advocate",
+  "Chief of Staff",
+  "Ex-colleague",
+  "Event Organizer",
 ];
 const EVIDENCE: {
-  type:
-    | "linkedin_mutual"
-    | "engagement"
-    | "shared_company"
-    | "shared_school";
+  type: "linkedin_mutual" | "engagement" | "shared_company" | "shared_school";
   make: (company: string) => string;
 }[] = [
   { type: "shared_company", make: (co) => `Overlapped at ${co}` },
-  { type: "linkedin_mutual", make: () => "Several mutual LinkedIn connections" },
+  {
+    type: "linkedin_mutual",
+    make: () => "Several mutual LinkedIn connections",
+  },
   { type: "shared_school", make: () => "Studied together at Berkeley" },
   { type: "engagement", make: () => "Engages with their posts often" },
 ];
@@ -265,11 +352,13 @@ export const seedNetwork = internalMutation({
     const nLeads = args.leads ?? 34;
     const nConnectors = args.connectors ?? 12;
 
-    // Resolve the owner: explicit arg, else the demo account.
+    // Resolve the owner: explicit arg, else the demo account (via the email index).
     let userId = args.userId;
     if (!userId) {
-      const users = await ctx.db.query("users").take(1000);
-      const demo = users.find((u) => u.email === DEMO_EMAIL);
+      const demo = await ctx.db
+        .query("users")
+        .withIndex("email", (q) => q.eq("email", DEMO_EMAIL))
+        .first();
       userId =
         demo?._id ??
         (await ctx.db.insert("users", {
@@ -279,17 +368,24 @@ export const seedNetwork = internalMutation({
     }
 
     // Idempotent, per user: clear ONLY this user's network. Other users' data,
-    // and the auth/users/connectors tables, are untouched.
+    // and the auth/users/connectors tables, are untouched. personVectors and
+    // feedback carry no userId, so they are reached per owned person through
+    // by_person — never by scanning other users' rows.
     const owned = await ctx.db
       .query("persons")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .collect();
-    const ownedIds = new Set(owned.map((p) => p._id));
-    for (const pv of await ctx.db.query("personVectors").collect()) {
-      if (ownedIds.has(pv.personId)) await ctx.db.delete(pv._id);
-    }
-    for (const fb of await ctx.db.query("feedback").collect()) {
-      if (ownedIds.has(fb.personId)) await ctx.db.delete(fb._id);
+    for (const p of owned) {
+      const vectors = await ctx.db
+        .query("personVectors")
+        .withIndex("by_person", (q) => q.eq("personId", p._id))
+        .collect();
+      for (const pv of vectors) await ctx.db.delete(pv._id);
+      const votes = await ctx.db
+        .query("feedback")
+        .withIndex("by_person", (q) => q.eq("personId", p._id))
+        .collect();
+      for (const fb of votes) await ctx.db.delete(fb._id);
     }
     for (const r of await ctx.db
       .query("recommendations")

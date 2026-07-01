@@ -9,6 +9,7 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as authz from "../authz.js";
 import type * as avatars from "../avatars.js";
 import type * as connectors from "../connectors.js";
 import type * as crons from "../crons.js";
@@ -29,6 +30,7 @@ import type * as onboard from "../onboard.js";
 import type * as openai from "../openai.js";
 import type * as rank from "../rank.js";
 import type * as resolve from "../resolve.js";
+import type * as seedDemo from "../seedDemo.js";
 
 import type {
   ApiFromModules,
@@ -38,6 +40,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  authz: typeof authz;
   avatars: typeof avatars;
   connectors: typeof connectors;
   crons: typeof crons;
@@ -58,6 +61,7 @@ declare const fullApi: ApiFromModules<{
   openai: typeof openai;
   rank: typeof rank;
   resolve: typeof resolve;
+  seedDemo: typeof seedDemo;
 }>;
 
 /**

@@ -7,7 +7,13 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { embed, judge } from "./openai";
-import { cosine, reachability, feedScore, introScore, nudgeVector } from "./lib";
+import {
+  cosine,
+  reachability,
+  feedScore,
+  introScore,
+  nudgeVector,
+} from "./lib";
 
 const CANDIDATE_LIMIT = 120;
 const DEFAULT_JUDGE_TOP_N = 12;
@@ -42,10 +48,14 @@ export const rankData = internalQuery({
   ),
   handler: async (ctx, args) => {
     const icp = await ctx.db.get(args.icpId);
-    if (!icp) return null;
+    // The icp row carries the owner; candidates come only from that user's graph.
+    if (!icp || icp.userId === undefined) return null;
+    const owner = icp.userId;
     const leadDocs = await ctx.db
       .query("persons")
-      .withIndex("by_role", (q) => q.eq("role", "lead"))
+      .withIndex("by_user_and_role", (q) =>
+        q.eq("userId", owner).eq("role", "lead"),
+      )
       .take(CANDIDATE_LIMIT);
     const leads = [];
     for (const p of leadDocs) {
@@ -60,8 +70,10 @@ export const rankData = internalQuery({
         .take(25);
       let bestIntro = 0;
       for (const e of edges) {
+        if (e.userId !== owner) continue;
         const c = await ctx.db.get(e.from);
-        const s = introScore(c?.tieStrength ?? 0, e.confidence);
+        if (!c || c.userId !== owner) continue;
+        const s = introScore(c.tieStrength ?? 0, e.confidence);
         if (s > bestIntro) bestIntro = s;
       }
       leads.push({
@@ -88,13 +100,20 @@ export const voteVectors = internalQuery({
     down: v.array(v.array(v.number())),
   }),
   handler: async (ctx, args) => {
+    const up: number[][] = [];
+    const down: number[][] = [];
+    const icp = await ctx.db.get(args.icpId);
+    if (!icp || icp.userId === undefined) return { up, down };
+    const owner = icp.userId;
     const votes = await ctx.db
       .query("feedback")
       .withIndex("by_icp", (q) => q.eq("icpId", args.icpId))
       .take(500);
-    const up: number[][] = [];
-    const down: number[][] = [];
     for (const f of votes) {
+      // feedback is scoped through its icp; skip any row whose person the icp
+      // owner doesn't own (defense against directly inserted rows).
+      const person = await ctx.db.get(f.personId);
+      if (!person || person.userId !== owner) continue;
       const vec = await ctx.db
         .query("personVectors")
         .withIndex("by_person", (q) => q.eq("personId", f.personId))
@@ -114,7 +133,8 @@ export const upsertVector = internalMutation({
       .query("personVectors")
       .withIndex("by_person", (q) => q.eq("personId", args.personId))
       .first();
-    if (existing) await ctx.db.patch(existing._id, { embedding: args.embedding });
+    if (existing)
+      await ctx.db.patch(existing._id, { embedding: args.embedding });
     else
       await ctx.db.insert("personVectors", {
         personId: args.personId,
@@ -137,14 +157,18 @@ export const connectorsForLead = internalQuery({
     }),
   ),
   handler: async (ctx, args) => {
+    const lead = await ctx.db.get(args.leadId);
+    if (!lead || lead.userId === undefined) return [];
+    const owner = lead.userId;
     const edges = await ctx.db
       .query("edges")
       .withIndex("by_to", (q) => q.eq("to", args.leadId))
       .take(50);
     const out = [];
     for (const e of edges) {
+      if (e.userId !== owner) continue;
       const c = await ctx.db.get(e.from);
-      if (!c) continue;
+      if (!c || c.userId !== owner) continue;
       out.push({
         id: c._id,
         name: c.name,
@@ -179,6 +203,13 @@ export const writeRecommendation = internalMutation({
   },
   returns: v.id("recommendations"),
   handler: async (ctx, args) => {
+    // Recommendations inherit the icp's owner; a person outside that owner's
+    // graph can never be written into their feed.
+    const icp = await ctx.db.get(args.icpId);
+    if (!icp || icp.userId === undefined) throw new Error("icp not found");
+    const person = await ctx.db.get(args.personId);
+    if (!person || person.userId !== icp.userId)
+      throw new Error("person not found");
     const existing = await ctx.db
       .query("recommendations")
       .withIndex("by_person", (q) => q.eq("personId", args.personId))
@@ -187,6 +218,7 @@ export const writeRecommendation = internalMutation({
       if (r.icpId === args.icpId) await ctx.db.delete(r._id);
     }
     return await ctx.db.insert("recommendations", {
+      userId: icp.userId,
       personId: args.personId,
       icpId: args.icpId,
       kind: "lead",
@@ -276,10 +308,9 @@ export const rebuild = internalAction({
     const top = scored.slice(0, topN);
     let judged = 0;
     for (const lead of top) {
-      const connectors = await ctx.runQuery(
-        internal.rank.connectorsForLead,
-        { leadId: lead.id },
-      );
+      const connectors = await ctx.runQuery(internal.rank.connectorsForLead, {
+        leadId: lead.id,
+      });
       const j = await judge({
         icpText: data.icpText,
         person: {

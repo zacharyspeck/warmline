@@ -1,6 +1,12 @@
 // Local seed loader — reads your real exports and pushes them into Convex.
 // PII NEVER leaves your machine except as graph rows in your own Convex deploy.
 //
+// ⚠️ DEPRECATED since Phase 2 (multi-user): the ingest mutations now require a
+// signed-in user and stamp rows with the caller's userId, so this unauthenticated
+// script fails with "Not authenticated". Use the in-app LinkedIn upload
+// (Connectors page) for real data, or `npx convex run devSeed:seedNetwork` for
+// synthetic data.
+//
 //   node scripts/seed.mjs            # ingest
 //   node scripts/seed.mjs --reset    # wipe Warmline tables first
 //

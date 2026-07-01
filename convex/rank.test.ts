@@ -21,12 +21,15 @@ const VOTE_NUDGE = 0.15; // mirrors the constant in rank.ts
 test("voteVectors: joins thumbs to cached person vectors, skips missing", async () => {
   const t = convexTest(schema, modules);
   const { icpId } = await t.run(async (ctx) => {
+    const userId = await ctx.db.insert("users", { email: "rank@example.com" });
     const icpId = await ctx.db.insert("icp", {
+      userId,
       text: "AI founders",
       source: {},
     });
     const mk = async (name: string, emb: number[] | null) => {
       const id = await ctx.db.insert("persons", {
+        userId,
         name,
         isSelf: false,
         role: "lead" as const,
@@ -51,17 +54,52 @@ test("voteVectors: joins thumbs to cached person vectors, skips missing", async 
   expect(down).toEqual([vec({ 2: 1 })]);
 });
 
+test("voteVectors: a feedback row pointing at another user's person is ignored", async () => {
+  const t = convexTest(schema, modules);
+  const { icpId } = await t.run(async (ctx) => {
+    const ownerId = await ctx.db.insert("users", { email: "own@example.com" });
+    const otherId = await ctx.db.insert("users", { email: "oth@example.com" });
+    const icpId = await ctx.db.insert("icp", {
+      userId: ownerId,
+      text: "AI founders",
+      source: {},
+    });
+    // A directly inserted feedback row referencing a foreign person: its cached
+    // vector must never bend this icp's ranking.
+    const foreign = await ctx.db.insert("persons", {
+      userId: otherId,
+      name: "Foreign Person",
+      isSelf: false,
+      role: "lead" as const,
+      relationshipToYou: "not_connected" as const,
+    });
+    await ctx.db.insert("personVectors", {
+      personId: foreign,
+      embedding: vec({ 3: 1 }),
+    });
+    await ctx.db.insert("feedback", { icpId, personId: foreign, vote: "up" });
+    return { icpId };
+  });
+
+  const { up, down } = await t.query(internal.rank.voteVectors, { icpId });
+  expect(up).toEqual([]);
+  expect(down).toEqual([]);
+});
+
 test("nudge drops a down-voted lead's goal-fit on the next rebuild", async () => {
   const t = convexTest(schema, modules);
   const icpVector = vec({ 0: 1 });
   const { icpId, leadVec } = await t.run(async (ctx) => {
+    const userId = await ctx.db.insert("users", { email: "nudge@example.com" });
     const icpId = await ctx.db.insert("icp", {
+      userId,
       text: "x",
       source: {},
       vector: icpVector,
     });
     const leadVec = vec({ 2: 1 });
     const leadId = await ctx.db.insert("persons", {
+      userId,
       name: "Rejected Lead",
       isSelf: false,
       role: "lead" as const,
