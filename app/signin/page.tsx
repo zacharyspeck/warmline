@@ -1,16 +1,4 @@
-import { redirect } from "next/navigation";
-
-// Auth is dormant for this phase (the public demo has no login). /signin redirects
-// to the feed instead of rendering a login form, so no route depends on the auth
-// provider and the production build has nothing to prerender that needs auth.
-// The original sign-in form is preserved in the Phase 2 block below — restore it,
-// the ConvexAuthNextjsProvider (components/ConvexClientProvider.tsx), and the
-// proxy gate (proxy.ts) together when auth is wired up. Do not delete.
-export default function SignIn() {
-  redirect("/");
-}
-
-/* Phase 2 — restore the sign-in form (needs "use client" at the top of the file):
+"use client";
 
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useRouter } from "next/navigation";
@@ -38,7 +26,7 @@ export default function SignIn() {
       <div className="flex flex-col items-center gap-3 text-center">
         <span className="text-2xl font-semibold tracking-tight">Warmline</span>
         <p className="max-w-sm text-sm text-muted-foreground">
-          Who to reach out to, and why. Sign in to see your feed.
+          Who to reach out to, and why. Sign in to see your feed
         </p>
       </div>
 
@@ -47,8 +35,8 @@ export default function SignIn() {
           <CardTitle>{flow === "signIn" ? "Sign in" : "Create account"}</CardTitle>
           <CardDescription>
             {flow === "signIn"
-              ? "Pick up where you left off."
-              : "Surface warm intros for your goal."}
+              ? "Pick up where you left off"
+              : "Surface warm intros for your goal"}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -88,20 +76,20 @@ export default function SignIn() {
                 id="password"
                 type="password"
                 name="password"
-                placeholder="********"
+                placeholder="••••••••"
                 autoComplete={flow === "signIn" ? "current-password" : "new-password"}
                 minLength={8}
                 required
               />
               {flow === "signUp" && (
                 <p className="px-1 text-xs text-muted-foreground">
-                  Password must be at least 8 characters.
+                  Password must be at least 8 characters
                 </p>
               )}
             </div>
 
             <Button type="submit" variant="primary" disabled={loading} className="mt-1">
-              {loading ? "Loading..." : flow === "signIn" ? "Sign in" : "Sign up"}
+              {loading ? "Loading…" : flow === "signIn" ? "Sign in" : "Sign up"}
             </Button>
 
             <div className="flex flex-row justify-center gap-2 text-sm">
@@ -130,4 +118,3 @@ export default function SignIn() {
     </div>
   );
 }
-*/

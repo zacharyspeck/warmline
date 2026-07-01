@@ -1,6 +1,9 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
+import { useQuery } from "convex/react";
+import { useAuthActions } from "@convex-dev/auth/react";
+import { api } from "@/convex/_generated/api";
 import {
   Sidebar,
   SidebarContent,
@@ -12,12 +15,14 @@ import {
 import { WarmlineLockup } from "@/components/warmline-mark";
 
 // App shell: the sidebar lives here so it's present on every page.
-// Hidden on the onboarding screen.
+// Full-screen routes (onboarding, sign in) render without it.
 export default function AppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const me = useQuery(api.auth.currentUser);
+  const { signOut } = useAuthActions();
 
-  if (pathname === "/onboarding") return <>{children}</>;
+  if (pathname === "/onboarding" || pathname === "/signin") return <>{children}</>;
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -35,9 +40,22 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
-          <p className="px-3 py-1 text-sm text-foreground/60">
-            Refreshed daily
-          </p>
+          {me ? (
+            <div className="flex flex-col gap-0.5 px-3 py-1">
+              <span className="truncate text-xs text-muted-foreground">
+                {me.email ?? "Signed in"}
+              </span>
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="text-left text-sm text-foreground/60 transition-colors hover:text-foreground"
+              >
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <p className="px-3 py-1 text-sm text-foreground/60">Refreshed daily</p>
+          )}
         </SidebarFooter>
       </Sidebar>
 

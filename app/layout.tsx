@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Schibsted_Grotesk } from "next/font/google";
+import { ConvexAuthNextjsServerProvider } from "@convex-dev/auth/nextjs/server";
 import "./globals.css";
 import ConvexClientProvider from "@/components/ConvexClientProvider";
 import AppChrome from "@/components/app-chrome";
@@ -31,15 +32,19 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // The server provider must wrap the tree so the client auth provider has a
+  // defined auth state on both server and client render.
   return (
-    <html lang="en" className="dark">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} ${schibsted.variable} font-sans antialiased min-h-screen bg-background text-foreground`}
-      >
-        <ConvexClientProvider>
-          <AppChrome>{children}</AppChrome>
-        </ConvexClientProvider>
-      </body>
-    </html>
+    <ConvexAuthNextjsServerProvider>
+      <html lang="en" className="dark">
+        <body
+          className={`${geistSans.variable} ${geistMono.variable} ${schibsted.variable} font-sans antialiased min-h-screen bg-background text-foreground`}
+        >
+          <ConvexClientProvider>
+            <AppChrome>{children}</AppChrome>
+          </ConvexClientProvider>
+        </body>
+      </html>
+    </ConvexAuthNextjsServerProvider>
   );
 }
