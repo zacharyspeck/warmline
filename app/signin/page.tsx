@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuthActions } from "@convex-dev/auth/react";
+import { ConvexError } from "convex/values";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -53,7 +54,14 @@ export default function SignIn() {
                   router.push(flow === "signUp" ? "/onboarding" : "/");
                 })
                 .catch((error) => {
-                  setError(error.message);
+                  // ConvexError data survives prod redaction (e.g. the invite
+                  // gate's message); anything else falls back to error.message.
+                  setError(
+                    error instanceof ConvexError &&
+                      typeof error.data === "string"
+                      ? error.data
+                      : error.message,
+                  );
                   setLoading(false);
                 });
             }}
@@ -87,6 +95,23 @@ export default function SignIn() {
                 </p>
               )}
             </div>
+
+            {flow === "signUp" && (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="inviteCode">Invite code</Label>
+                <Input
+                  id="inviteCode"
+                  type="text"
+                  name="inviteCode"
+                  placeholder="From your invite"
+                  autoComplete="off"
+                  required
+                />
+                <p className="px-1 text-xs text-muted-foreground">
+                  Warmline is invite-only for now
+                </p>
+              </div>
+            )}
 
             <Button type="submit" variant="primary" disabled={loading} className="mt-1">
               {loading ? "Loading…" : flow === "signIn" ? "Sign in" : "Sign up"}
