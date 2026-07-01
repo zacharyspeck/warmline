@@ -304,25 +304,34 @@ function FeedRowView({
           </ul>
         </TableCell>
 
-        {/* Mutuals */}
+        {/* Mutuals — warm path: bridging connectors for a lead, fan-out for a connector */}
         <TableCell className="align-top">
           {row.mutuals.length > 0 ? (
-            <AvatarGroup max={3}>
-              {row.mutuals.map((m) => (
-                <Tooltip key={m.name}>
-                  <TooltipTrigger asChild>
-                    <Avatar className="ring-2 ring-background">
-                      <AvatarFallback className="text-[10px]">
-                        {m.initials}
-                      </AvatarFallback>
-                    </Avatar>
-                  </TooltipTrigger>
-                  <TooltipContent>{m.name}</TooltipContent>
-                </Tooltip>
-              ))}
-            </AvatarGroup>
+            <div className="flex items-center gap-1.5">
+              <AvatarGroup max={3}>
+                {row.mutuals.map((m) => (
+                  <Tooltip key={m.name}>
+                    <TooltipTrigger asChild>
+                      <Avatar className="ring-2 ring-background">
+                        <AvatarFallback className="text-[10px]">
+                          {m.initials}
+                        </AvatarFallback>
+                      </Avatar>
+                    </TooltipTrigger>
+                    <TooltipContent>{m.name}</TooltipContent>
+                  </Tooltip>
+                ))}
+              </AvatarGroup>
+              {row.mutualsTotal > row.mutuals.length && (
+                <span className="text-xs font-medium tabular-nums text-muted-foreground">
+                  +{row.mutualsTotal - row.mutuals.length}
+                </span>
+              )}
+            </div>
           ) : (
-            <span className="text-xs text-muted-foreground/40">No path yet</span>
+            <span className="text-xs text-muted-foreground/40">
+              No warm path yet
+            </span>
           )}
         </TableCell>
 

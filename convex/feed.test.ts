@@ -100,6 +100,45 @@ test("mutuals: a lead's row lists the connector bridged by a shared_company edge
   expect(lead!.mutuals.map((m) => m.name)).toContain("Bridge Person");
 });
 
+// Han Wang is a gatekeeper connector: his warm path is the leads he unlocks, so
+// his row must show a fan-out stack with a total, never "No path yet".
+test("connector row shows its fan-out as a warm-path stack with a total", async () => {
+  const t = convexTest(schema, modules);
+  const { hanId } = await t.run(async (ctx) => {
+    const hanId = await ctx.db.insert("persons", {
+      name: "Han Wang",
+      isSelf: false,
+      role: "connector",
+      relationshipToYou: "connected",
+      tieStrength: 0.9,
+      unlockValue: 4, // > 0 so the connector row appears in the feed
+    });
+    for (const name of ["Lead A", "Lead B", "Lead C", "Lead D"]) {
+      const leadId = await ctx.db.insert("persons", {
+        name,
+        isSelf: false,
+        role: "lead",
+        relationshipToYou: "not_connected",
+      });
+      await ctx.db.insert("edges", {
+        from: hanId,
+        to: leadId,
+        type: "engagement",
+        confidence: 0.7,
+        evidence: "Both attended Mintlify Gala",
+      });
+    }
+    return { hanId };
+  });
+
+  const rows = await t.query(api.feed.list, {});
+  const han = rows.find((r) => r.id === hanId);
+  expect(han).toBeDefined();
+  // a real stack (not the empty state) capped at 3, with the true total of 4
+  expect(han!.mutuals.length).toBe(3);
+  expect(han!.mutualsTotal).toBe(4);
+});
+
 test("recommendation path: lead appears with the recommendation's why/how", async () => {
   const t = convexTest(schema, modules);
   const { leadId } = await t.run(async (ctx) => {

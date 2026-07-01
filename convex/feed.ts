@@ -1,6 +1,6 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
-import { Doc, Id } from "./_generated/dataModel";
+import { Doc } from "./_generated/dataModel";
 import { QueryCtx } from "./_generated/server";
 import { initials, confLabel, reachability, introScore } from "./lib";
 
@@ -32,34 +32,57 @@ const feedRow = v.object({
   unlocks: v.optional(v.number()),
   why: v.array(v.object({ text: v.string(), confidence })),
   mutuals: v.array(v.object({ name: v.string(), initials: v.string() })),
+  // Total warm-path people (bridging connectors for a lead, unlocked leads for a
+  // connector). `mutuals` is capped for the avatar stack; this is the real count.
+  mutualsTotal: v.number(),
   how: v.array(v.string()),
   opener: v.optional(v.string()),
 });
 
 const GATEKEEPER_MIN = 8;
 
-// Top connectors bridging to a lead, ranked by intro_score.
-async function mutualsFor(
+// Warm-path people for a row: the avatar stack (capped at 3) plus the true total.
+//   • lead      → connectors who bridge you to them, ranked by intro_score
+//   • connector → the leads they unlock (their fan-out), ranked by edge confidence
+// A connector's fan-out is why "No path yet" was wrong for gatekeepers: they ARE
+// the warm path, so their row shows who they open up.
+async function warmPathFor(
   ctx: QueryCtx,
-  leadId: Id<"persons">,
-): Promise<{ name: string; initials: string }[]> {
-  const edges = await ctx.db
-    .query("edges")
-    .withIndex("by_to", (q) => q.eq("to", leadId))
-    .take(50);
-  // Keep the best edge per connector (a connector may have several edge types).
+  p: Doc<"persons">,
+): Promise<{ people: { name: string; initials: string }[]; total: number }> {
   const best = new Map<string, { name: string; score: number }>();
-  for (const e of edges) {
-    const c = await ctx.db.get(e.from);
-    if (!c) continue;
-    const score = introScore(c.tieStrength ?? 0, e.confidence);
-    const prev = best.get(e.from);
-    if (!prev || score > prev.score) best.set(e.from, { name: c.name, score });
+  if (p.role === "lead") {
+    const edges = await ctx.db
+      .query("edges")
+      .withIndex("by_to", (q) => q.eq("to", p._id))
+      .take(50);
+    for (const e of edges) {
+      const c = await ctx.db.get(e.from);
+      if (!c || c.isSelf) continue;
+      const score = introScore(c.tieStrength ?? 0, e.confidence);
+      const prev = best.get(e.from);
+      if (!prev || score > prev.score) best.set(e.from, { name: c.name, score });
+    }
+  } else {
+    const edges = await ctx.db
+      .query("edges")
+      .withIndex("by_from", (q) => q.eq("from", p._id))
+      .take(50);
+    for (const e of edges) {
+      const lead = await ctx.db.get(e.to);
+      if (!lead || lead.isSelf) continue;
+      const prev = best.get(e.to);
+      if (!prev || e.confidence > prev.score)
+        best.set(e.to, { name: lead.name, score: e.confidence });
+    }
   }
-  return [...best.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
-    .map((m) => ({ name: m.name, initials: initials(m.name) }));
+  const ranked = [...best.values()].sort((a, b) => b.score - a.score);
+  return {
+    people: ranked
+      .slice(0, 3)
+      .map((m) => ({ name: m.name, initials: initials(m.name) })),
+    total: ranked.length,
+  };
 }
 
 function heuristicRow(p: Doc<"persons">) {
@@ -191,6 +214,7 @@ export const list = query({
     const rows = [];
     for (const x of pre.slice(0, limit)) {
       const p = x.p;
+      const warmPath = await warmPathFor(ctx, p);
       rows.push({
         id: p._id,
         kind: p.role,
@@ -206,7 +230,8 @@ export const list = query({
         tieStrength: Math.round(100 * (p.tieStrength ?? 0)),
         unlocks: p.role === "connector" ? p.unlockValue : undefined,
         why: x.why,
-        mutuals: p.role === "lead" ? await mutualsFor(ctx, p._id) : [],
+        mutuals: warmPath.people,
+        mutualsTotal: warmPath.total,
         how: x.how,
         opener: x.opener,
       });
