@@ -143,6 +143,11 @@ export default defineSchema({
       linkedin: v.optional(v.string()),
       x: v.optional(v.string()),
     }),
+    // Who this feed is for: one person growing their own network, or a company /
+    // growth team finding who to sell to. Frames the derived-goal prompt + copy.
+    audience: v.optional(
+      v.union(v.literal("individual"), v.literal("company")),
+    ),
   }).index("by_user", ["userId"]),
 
   // Thumbs up/down — nudges icp.vector → live re-sort. `at` = _creationTime.

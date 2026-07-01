@@ -29,22 +29,31 @@ async function scrapeSite(url: string): Promise<string> {
   }
 }
 
-// Onboarding: 3 links → derive the ICP from the product site → rank the feed
-// against it. The single call the onboarding screen awaits while it animates.
+// Onboarding: audience + 3 links → derive the ICP from the product site → rank
+// the feed against it. The single call the onboarding screen awaits while it
+// animates. Roadmap (not built here): CRM integration and network pooling.
 export const generate = action({
   args: {
     website: v.optional(v.string()),
     linkedin: v.optional(v.string()),
     x: v.optional(v.string()),
+    audience: v.optional(
+      v.union(v.literal("individual"), v.literal("company")),
+    ),
     judgeTopN: v.optional(v.number()),
   },
   returns: v.object({ icpId: v.id("icp"), icpText: v.string() }),
   handler: async (ctx, args) => {
-    let icpText = "Growth and GTM engineers building with AI";
+    const audience = args.audience ?? "company";
+    // Fallback goal when there is no site to scrape (or no key), framed by audience.
+    let icpText =
+      audience === "individual"
+        ? "People one step ahead in my field who can make a warm introduction"
+        : "Growth and GTM engineers building with AI";
     if (args.website) {
       const md = await scrapeSite(args.website);
       if (md) {
-        const derived = await deriveIcp(md);
+        const derived = await deriveIcp(md, audience);
         if (derived) icpText = derived;
       }
     }
@@ -52,6 +61,7 @@ export const generate = action({
     const icpId: Id<"icp"> = await ctx.runMutation(api.icp.saveIcp, {
       text: icpText,
       source: { website: args.website, linkedin: args.linkedin, x: args.x },
+      audience,
     });
 
     // rebuild embeds the ICP, scores leads (goal-fit × reachability), and writes

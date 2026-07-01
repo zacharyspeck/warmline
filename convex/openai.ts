@@ -26,8 +26,31 @@ export async function embed(text: string): Promise<number[]> {
   return data.data[0].embedding;
 }
 
-// Derive the ICP (who they sell to) from a scraped product site.
-export async function deriveIcp(siteMarkdown: string): Promise<string> {
+export type Audience = "individual" | "company";
+
+// The derived-goal system prompt, framed by who the feed is for. Pure + exported
+// so the framing is unit-testable. Individual = one person growing their own
+// network; company = a team deciding who to sell to.
+export function icpSystemPrompt(audience: Audience): string {
+  if (audience === "individual") {
+    return (
+      "You are helping one person grow their own network and career. " +
+      "From their site or profile, write 1 to 2 sentences describing the kind of people they should meet " +
+      "(role, seniority, company type, domain) to reach their goal. Be concrete and specific. Return only those sentences with no preamble"
+    );
+  }
+  return (
+    "You are helping a company or growth team decide who to reach. " +
+    "From this company's website, write 1 to 2 sentences describing their ICP, the specific people they sell to " +
+    "(role, seniority, company type, domain). Be concrete and specific. Return only those sentences with no preamble"
+  );
+}
+
+// Derive the ICP from a scraped product site, framed by audience.
+export async function deriveIcp(
+  siteMarkdown: string,
+  audience: Audience = "company",
+): Promise<string> {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -37,11 +60,7 @@ export async function deriveIcp(siteMarkdown: string): Promise<string> {
     body: JSON.stringify({
       model: CHAT_MODEL,
       messages: [
-        {
-          role: "system",
-          content:
-            "From this company's website, write 1–2 sentences describing their ICP — the specific people they sell to (role, seniority, company type, domain). Be concrete. No preamble.",
-        },
+        { role: "system", content: icpSystemPrompt(audience) },
         { role: "user", content: siteMarkdown.slice(0, 6000) },
       ],
       temperature: 0.3,

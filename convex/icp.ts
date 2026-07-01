@@ -15,12 +15,16 @@ const sourceValidator = v.object({
   x: v.optional(v.string()),
 });
 
-// Onboarding: store the ICP text (derived from the product site) + the 3 links.
+// Onboarding: store the ICP text (derived from the product site) + the 3 links
+// + who the feed is for (individual vs company).
 export const saveIcp = mutation({
   args: {
     userId: v.optional(v.id("users")),
     text: v.string(),
     source: sourceValidator,
+    audience: v.optional(
+      v.union(v.literal("individual"), v.literal("company")),
+    ),
   },
   returns: v.id("icp"),
   handler: async (ctx, args) => {
@@ -28,6 +32,7 @@ export const saveIcp = mutation({
       userId: args.userId,
       text: args.text,
       source: args.source,
+      ...(args.audience ? { audience: args.audience } : {}),
     });
   },
 });

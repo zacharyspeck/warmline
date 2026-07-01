@@ -57,7 +57,10 @@ export default function Onboarding() {
   const recordUpload = useMutation(api.connectors.recordUpload);
   const parseLinkedIn = useAction(api.linkedinImport.parseLinkedInExport);
 
-  const [phase, setPhase] = useState<"product" | "connect" | "processing">("product");
+  const [phase, setPhase] = useState<
+    "audience" | "product" | "connect" | "processing"
+  >("audience");
+  const [audience, setAudience] = useState<"individual" | "company">("company");
   const [website, setWebsite] = useState("");
   const [linkedin, setLinkedin] = useState("");
   const [x, setX] = useState("");
@@ -134,6 +137,7 @@ export default function Onboarding() {
         website: website || undefined,
         linkedin: linkedin || undefined,
         x: x || undefined,
+        audience,
       });
       setStep(PROCESSING_STEPS.length);
       setTimeout(() => router.push("/"), 1400);
@@ -159,8 +163,17 @@ export default function Onboarding() {
           <WarmlineLockup markClassName="size-7" />
         </div>
 
+        {phase === "audience" && (
+          <AudienceStep
+            value={audience}
+            onChange={setAudience}
+            onNext={() => setPhase("product")}
+          />
+        )}
+
         {phase === "product" && (
           <ProductStep
+            audience={audience}
             website={website}
             linkedin={linkedin}
             x={x}
@@ -213,22 +226,102 @@ export default function Onboarding() {
   );
 }
 
+function AudienceStep({
+  value,
+  onChange,
+  onNext,
+}: {
+  value: "individual" | "company";
+  onChange: (v: "individual" | "company") => void;
+  onNext: () => void;
+}) {
+  const options: {
+    id: "individual" | "company";
+    title: string;
+    blurb: string;
+  }[] = [
+    {
+      id: "individual",
+      title: "Just me",
+      blurb: "Grow my own network and reach people who can help my goal",
+    },
+    {
+      id: "company",
+      title: "A company or growth team",
+      blurb: "Find and warm up the people we want to sell to",
+    },
+  ];
+  return (
+    <div>
+      <h1 className="text-xl font-semibold tracking-tight">Who is this for?</h1>
+      <p className="mt-1.5 text-sm text-muted-foreground">
+        This shapes how we read your goal and who we surface
+      </p>
+      <div className="mt-7 flex flex-col gap-2.5">
+        {options.map((o) => {
+          const selected = value === o.id;
+          return (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => onChange(o.id)}
+              aria-pressed={selected}
+              className={cn(
+                "rounded-xl border bg-card p-4 text-left [box-shadow:var(--shadow-s)] transition-colors",
+                selected
+                  ? "border-primary ring-1 ring-primary"
+                  : "border-border hover:border-ring/40",
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-foreground">
+                  {o.title}
+                </span>
+                {selected && (
+                  <CheckIcon className="size-4 text-primary" aria-hidden />
+                )}
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">{o.blurb}</p>
+            </button>
+          );
+        })}
+        <Button onClick={onNext} className="mt-1">
+          Continue
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function ProductStep({
-  website, linkedin, x,
+  audience, website, linkedin, x,
   onWebsite, onLinkedin, onX, onNext,
 }: {
+  audience: "individual" | "company";
   website: string; linkedin: string; x: string;
   onWebsite: (v: string) => void; onLinkedin: (v: string) => void; onX: (v: string) => void;
   onNext: () => void;
 }) {
+  const individual = audience === "individual";
   return (
     <div>
-      <h1 className="text-xl font-semibold tracking-tight">What do you sell?</h1>
+      <h1 className="text-xl font-semibold tracking-tight">
+        {individual ? "What are you working on?" : "What do you sell?"}
+      </h1>
       <p className="mt-1.5 text-sm text-muted-foreground">
-        We read your product to learn who you&apos;re selling to, then rank people you know against it.
+        {individual
+          ? "We read what you're building to learn who you should meet, then rank the people you know by who can help"
+          : "We read your product to learn who you're selling to, then rank the people you know against it"}
       </p>
       <div className="mt-7 flex flex-col gap-4">
-        <Field label="Product website" value={website} onChange={onWebsite} placeholder="https://your-product.com" type="url" autoFocus />
+        <Field
+          label={individual ? "Your site or portfolio" : "Product website"}
+          value={website}
+          onChange={onWebsite}
+          placeholder={individual ? "https://your-site.com" : "https://your-product.com"}
+          type="url"
+          autoFocus
+        />
         <Field label="Your LinkedIn" value={linkedin} onChange={onLinkedin} placeholder="https://linkedin.com/in/you" type="url" />
         <Field label="Your X" value={x} onChange={onX} placeholder="https://x.com/you" type="url" />
         <Button onClick={onNext} disabled={!website.trim()} className="mt-1">
@@ -271,7 +364,7 @@ function ConnectStep({
     <div>
       <h1 className="text-xl font-semibold tracking-tight">Connect your network</h1>
       <p className="mt-1.5 text-sm text-muted-foreground">
-        The more contacts you add, the warmer your paths.
+        The more contacts you add, the warmer your paths
       </p>
 
       <div className="mt-6 grid grid-cols-2 gap-2.5">
