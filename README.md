@@ -10,6 +10,10 @@ Built for the **YC AI Growth Hackathon** (24-hour build).
 
 ![Warmline feed: ranked list of who to reach out to, with why and how](feed-screenshot.png)
 
+## My contribution
+
+I came up with the original concept, built the demo/seed dataset, and wrote the core data script — the `seed/generate.mjs` generator that produces the demo data (along with its validator and loader). My teammate built the project scaffolding and handled deployment.
+
 ## What makes it different
 
 - **Proactive, not reactive**: pushes the intro you didn't ask for.
