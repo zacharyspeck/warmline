@@ -51,6 +51,9 @@ export default defineSchema({
 
   // Graph nodes — people (You, Leads, Connectors).
   persons: defineTable({
+    // Owner of this row. Optional during the widen step; narrowed to required
+    // once existing seed rows are backfilled to the demo account (Phase B).
+    userId: v.optional(v.id("users")),
     name: v.string(),
     headline: v.optional(v.string()),
     company: v.optional(v.string()),
@@ -78,10 +81,16 @@ export default defineSchema({
     .index("by_xHandle", ["xHandle"])
     .index("by_role", ["role"])
     .index("by_company", ["company"])
-    .index("by_mutualsStatus", ["mutualsStatus"]),
+    .index("by_mutualsStatus", ["mutualsStatus"])
+    .index("by_user", ["userId"])
+    .index("by_user_and_role", ["userId", "role"])
+    .index("by_user_and_company", ["userId", "company"])
+    .index("by_user_and_linkedinUrl", ["userId", "linkedinUrl"])
+    .index("by_user_and_xHandle", ["userId", "xHandle"]),
 
   // Relationships (bridges). NOT co_attended_event — events are a channel, not a relationship.
   edges: defineTable({
+    userId: v.optional(v.id("users")),
     from: v.id("persons"),
     to: v.id("persons"),
     type: v.union(
@@ -97,26 +106,35 @@ export default defineSchema({
     .index("by_from", ["from"])
     .index("by_to", ["to"])
     .index("by_type", ["type"])
-    .index("by_from_and_type", ["from", "type"]),
+    .index("by_from_and_type", ["from", "type"])
+    .index("by_user", ["userId"])
+    .index("by_user_and_type", ["userId", "type"]),
 
   // "Go meet them" channel — not a who-knows-whom proxy.
   events: defineTable({
+    userId: v.optional(v.id("users")),
     name: v.string(),
     date: v.optional(v.number()),
-  }).index("by_name", ["name"]),
+  })
+    .index("by_name", ["name"])
+    .index("by_user", ["userId"])
+    .index("by_user_and_name", ["userId", "name"]),
 
   // Join: person × event, carrying attendance-confidence ("will they actually be there").
   attendance: defineTable({
+    userId: v.optional(v.id("users")),
     personId: v.id("persons"),
     eventId: v.id("events"),
     confidence: v.number(), // 0–1
   })
     .index("by_person", ["personId"])
     .index("by_event", ["eventId"])
-    .index("by_person_and_event", ["personId", "eventId"]),
+    .index("by_person_and_event", ["personId", "eventId"])
+    .index("by_user", ["userId"]),
 
   // The feed rows — kept separate from the graph so ranking/why/how recomputes freely.
   recommendations: defineTable({
+    userId: v.optional(v.id("users")),
     personId: v.id("persons"),
     icpId: v.id("icp"),
     kind: v.union(v.literal("lead"), v.literal("connector")),
@@ -131,7 +149,9 @@ export default defineSchema({
     whyNow: v.optional(v.string()), // trigger: job change / new post / event
   })
     .index("by_icp_and_score", ["icpId", "score"])
-    .index("by_person", ["personId"]),
+    .index("by_person", ["personId"])
+    .index("by_user", ["userId"])
+    .index("by_user_and_score", ["userId", "score"]),
 
   // Who you sell to — derived from the product site; the vector thumbs nudge.
   icp: defineTable({
