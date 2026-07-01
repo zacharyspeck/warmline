@@ -59,7 +59,29 @@ export default function Home() {
   useEffect(() => {
     if (icp === null) router.replace("/onboarding");
   }, [icp, router]);
-  const vote = useMutation(api.feedback.vote);
+  const votes = useQuery(
+    api.feedback.forIcp,
+    icp ? { icpId: icp._id } : "skip",
+  );
+  const voteFor = useMemo(() => {
+    const m = new Map<Id<"persons">, "up" | "down">();
+    for (const v of votes ?? []) m.set(v.personId, v.vote);
+    return m;
+  }, [votes]);
+
+  // Optimistic: write the vote into the feedback.forIcp cache immediately, then
+  // let the server query confirm. The selected thumb reflects state at once and
+  // still reads back correctly after a reload (forIcp returns persisted votes).
+  const vote = useMutation(api.feedback.vote).withOptimisticUpdate(
+    (store, args) => {
+      const q = { icpId: args.icpId };
+      const current = store.getQuery(api.feedback.forIcp, q);
+      if (current === undefined) return;
+      const next = current.filter((v) => v.personId !== args.personId);
+      next.push({ personId: args.personId, vote: args.vote });
+      store.setQuery(api.feedback.forIcp, q, next);
+    },
+  );
 
   const rows = useMemo(() => {
     const data = feed ?? [];
@@ -103,6 +125,7 @@ export default function Home() {
                 <FeedRowView
                   key={row.id}
                   row={row}
+                  currentVote={voteFor.get(row.id)}
                   expanded={expanded === row.id}
                   onToggle={() =>
                     setExpanded((cur) => (cur === row.id ? null : row.id))
@@ -168,11 +191,13 @@ function SocialLink({
 
 function FeedRowView({
   row,
+  currentVote,
   expanded,
   onToggle,
   onVote,
 }: {
   row: Row;
+  currentVote?: "up" | "down";
   expanded: boolean;
   onToggle: () => void;
   onVote: (v: "good" | "bad") => void;
@@ -286,8 +311,14 @@ function FeedRowView({
             <Button
               variant="ghost"
               size="icon"
-              className="size-8"
+              className={cn(
+                "size-8",
+                currentVote === "up"
+                  ? "bg-primary/15 text-primary hover:text-primary"
+                  : "text-muted-foreground",
+              )}
               aria-label="Good, more like this"
+              aria-pressed={currentVote === "up"}
               onClick={() => onVote("good")}
             >
               <ThumbsUpIcon className="size-4" />
@@ -295,8 +326,14 @@ function FeedRowView({
             <Button
               variant="ghost"
               size="icon"
-              className="size-8"
+              className={cn(
+                "size-8",
+                currentVote === "down"
+                  ? "bg-primary/15 text-primary hover:text-primary"
+                  : "text-muted-foreground",
+              )}
               aria-label="Bad, fewer like this"
+              aria-pressed={currentVote === "down"}
               onClick={() => onVote("bad")}
             >
               <ThumbsDownIcon className="size-4" />
