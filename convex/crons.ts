@@ -97,5 +97,13 @@ crons.cron(
   internal.crons.dailyRefresh,
   {},
 );
+// One usage-summary line per cycle, an hour after the refresh fan-out — by
+// then the per-user refreshes have run, so the totals reflect today's cycle.
+crons.cron(
+  "warmline usage summary",
+  "0 14 * * *",
+  internal.usage.logDailySummary,
+  {},
+);
 
 export default crons;

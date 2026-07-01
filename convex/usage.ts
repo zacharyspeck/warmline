@@ -1,7 +1,9 @@
-import { internalMutation } from "./_generated/server";
+import { internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import {
+  CATEGORIES,
   Category,
+  DEFAULT_TIER,
   dayKey,
   globalDailyCap,
   userDailyCap,
@@ -89,5 +91,100 @@ export const reserve = internalMutation({
       });
     }
     return { granted };
+  },
+});
+
+// ── Observability (Phase E3) ──
+
+const countsValidator = v.object({
+  judge: v.number(),
+  embed: v.number(),
+  scrape: v.number(),
+});
+
+// Admin view of today's spend: every user who spent anything, plus the global
+// totals and their caps. Internal — run it from the dashboard or CLI:
+//   npx convex run usage:adminToday
+export const adminToday = internalQuery({
+  args: {},
+  returns: v.object({
+    day: v.string(),
+    global: countsValidator,
+    globalCaps: countsValidator,
+    users: v.array(
+      v.object({
+        userId: v.id("users"),
+        email: v.union(v.string(), v.null()),
+        tier: v.string(),
+        judge: v.number(),
+        embed: v.number(),
+        scrape: v.number(),
+      }),
+    ),
+  }),
+  handler: async (ctx) => {
+    const day = dayKey(Date.now());
+    const globalRow = await ctx.db
+      .query("usageGlobal")
+      .withIndex("by_day", (q) => q.eq("day", day))
+      .unique();
+    const rows = await ctx.db
+      .query("usage")
+      .withIndex("by_day", (q) => q.eq("day", day))
+      .take(500);
+    const users = [];
+    for (const row of rows) {
+      const user = await ctx.db.get(row.userId);
+      users.push({
+        userId: row.userId,
+        email: user?.email ?? null,
+        tier: user?.tier ?? DEFAULT_TIER,
+        judge: row.judge,
+        embed: row.embed,
+        scrape: row.scrape,
+      });
+    }
+    users.sort((a, b) => b.judge + b.embed + b.scrape - (a.judge + a.embed + a.scrape));
+    return {
+      day,
+      global: {
+        judge: globalRow?.judge ?? 0,
+        embed: globalRow?.embed ?? 0,
+        scrape: globalRow?.scrape ?? 0,
+      },
+      globalCaps: {
+        judge: globalDailyCap("judge"),
+        embed: globalDailyCap("embed"),
+        scrape: globalDailyCap("scrape"),
+      },
+      users,
+    };
+  },
+});
+
+// The daily cycle's ONE summary line, visible in the Convex dashboard logs —
+// a runaway shows up the same day as used/cap ratios. Scheduled in crons.ts
+// an hour after the refresh fan-out, when the per-user refreshes have run.
+export const logDailySummary = internalMutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    const day = dayKey(Date.now());
+    const globalRow = await ctx.db
+      .query("usageGlobal")
+      .withIndex("by_day", (q) => q.eq("day", day))
+      .unique();
+    const rows = await ctx.db
+      .query("usage")
+      .withIndex("by_day", (q) => q.eq("day", day))
+      .take(500);
+    const parts = CATEGORIES.map((c: Category) => {
+      const used = globalRow?.[c] ?? 0;
+      return `${c}=${used}/${globalDailyCap(c)}`;
+    });
+    console.log(
+      `[usage] ${day} global ${parts.join(" ")} · ${rows.length} active user${rows.length === 1 ? "" : "s"}`,
+    );
+    return null;
   },
 });
