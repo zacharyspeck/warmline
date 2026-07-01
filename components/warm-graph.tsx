@@ -30,12 +30,29 @@ export type WarmGraphData =
   | { kind: "connector"; you: You; connector: Ref; unlocks: Ref[] };
 
 // ── Layout ──
-const COL = { you: 0, mid: 300, right: 600 };
-const ROW_GAP = 96;
+// A clean 3-layer left-to-right DAG: You → Connectors → Target (or the connector
+// fan-out). Column x derives from node width plus a gap wide enough for the edge
+// evidence labels; row spacing derives from node height so a column never
+// overlaps. Single-node layers (You, Target) sit at y=0, the vertical center of
+// the multi-node column, so the path reads straight across.
+const NODE_W = 190;
+const NODE_H = 56;
+const COL_GAP = 160; // horizontal room for edges + evidence labels
+const ROW_GAP = NODE_H + 40; // 96: even vertical spacing, no overlap
+const COL = {
+  you: 0,
+  mid: NODE_W + COL_GAP,
+  right: 2 * (NODE_W + COL_GAP),
+};
 const MAX_NODES = 12; // hard cap on rendered nodes
 
 function colY(i: number, n: number): number {
   return (i - (n - 1) / 2) * ROW_GAP;
+}
+
+// Keep edge labels short so they never overlap the nodes they sit between.
+function shortLabel(s: string, max = 30): string {
+  return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s;
 }
 
 function initialsOf(name: string): string {
@@ -232,7 +249,7 @@ function buildGraph(data: WarmGraphData): { nodes: Node[]; edges: Edge[] } {
       edges.push(flowEdge(`e-you-${c.id}`, "you", `c-${c.id}`));
       edges.push(
         flowEdge(`e-${c.id}-target`, `c-${c.id}`, "target", {
-          label: c.evidence,
+          label: shortLabel(c.evidence),
           confidence: c.confidence,
         }),
       );

@@ -1,5 +1,6 @@
 import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import { Id } from "./_generated/dataModel";
 
 export const clearRecs = internalMutation({
   args: {},
@@ -77,5 +78,163 @@ export const markSourcesConnected = internalMutation({
       inserted++;
     }
     return { inserted, userId: user._id };
+  },
+});
+
+// ── Local network seed ──────────────────────────────────────────────────────
+// Produce a substantive, fully synthetic network so the feed shows ~20-50 rows
+// locally with no OpenAI key: leads, connectors with fan-out, and bridge edges of
+// the same shape the app expects. Every person is invented, with no real
+// individual's private contact details. Companies are public brand names only.
+// Run via `npx convex run devSeed:seedNetwork`.
+
+const FIRST = [
+  "Ava", "Noah", "Mia", "Leo", "Zoe", "Kai", "Ivy", "Ravi", "Nora", "Theo",
+  "Lena", "Omar", "Sara", "Ben", "Priya", "Marco", "Anya", "Diego", "Iris", "Sam",
+];
+const LAST = [
+  "Reyes", "Okafor", "Nakamura", "Bauer", "Silva", "Haddad", "Nguyen", "Costa",
+  "Larsson", "Mehta", "Rossi", "Abara", "Kimura", "Novak", "Duarte", "Falk",
+];
+const COMPANIES = [
+  "Stripe", "Notion", "Linear", "Vercel", "Ramp", "Figma", "Retool", "Airtable",
+  "Amplitude", "Segment", "Datadog", "Snowflake", "Supabase", "Render",
+];
+const LEAD_ROLES = [
+  "Head of Growth", "Founder", "VP Engineering", "Product Lead", "GTM Lead",
+  "Head of Marketing", "Founding Engineer", "Head of Sales",
+];
+const CONNECTOR_TITLES = [
+  "Investor", "Community Lead", "Developer Advocate", "Chief of Staff",
+  "Ex-colleague", "Event Organizer",
+];
+const EVIDENCE: {
+  type:
+    | "linkedin_mutual"
+    | "engagement"
+    | "shared_company"
+    | "shared_school";
+  make: (company: string) => string;
+}[] = [
+  { type: "shared_company", make: (co) => `Overlapped at ${co}` },
+  { type: "linkedin_mutual", make: () => "Several mutual LinkedIn connections" },
+  { type: "shared_school", make: () => "Studied together at Berkeley" },
+  { type: "engagement", make: () => "Engages with their posts often" },
+];
+
+function personName(i: number): string {
+  return `${FIRST[i % FIRST.length]} ${
+    LAST[(i * 3 + Math.floor(i / FIRST.length)) % LAST.length]
+  }`;
+}
+function slugFor(name: string, i: number): string {
+  return `${name.toLowerCase().replace(/[^a-z]+/g, "-")}-${i}`;
+}
+
+export const seedNetwork = internalMutation({
+  args: { leads: v.optional(v.number()), connectors: v.optional(v.number()) },
+  returns: v.object({
+    persons: v.number(),
+    edges: v.number(),
+    leads: v.number(),
+    connectors: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const nLeads = args.leads ?? 34;
+    const nConnectors = args.connectors ?? 12;
+
+    // Idempotent: clear the Warmline domain tables (auth/users/connectors untouched).
+    for (const table of [
+      "recommendations",
+      "feedback",
+      "attendance",
+      "edges",
+      "personVectors",
+      "persons",
+      "events",
+      "icp",
+    ] as const) {
+      for (const row of await ctx.db.query(table).collect()) {
+        await ctx.db.delete(row._id);
+      }
+    }
+
+    // The goal (icp) — without it the app redirects to onboarding.
+    await ctx.db.insert("icp", {
+      text: "Founders and heads of growth at Series A to C dev tools companies",
+      source: {},
+    });
+
+    // Self.
+    await ctx.db.insert("persons", {
+      name: "You",
+      isSelf: true,
+      role: "connector",
+      relationshipToYou: "connected",
+      tieStrength: 1,
+    });
+
+    // Leads.
+    const leadIds: Id<"persons">[] = [];
+    for (let i = 0; i < nLeads; i++) {
+      const name = personName(i);
+      const company = COMPANIES[i % COMPANIES.length];
+      const role = LEAD_ROLES[i % LEAD_ROLES.length];
+      const connected = i % 6 === 0;
+      const id = await ctx.db.insert("persons", {
+        name,
+        headline: `${role} at ${company}`,
+        company,
+        linkedinUrl: slugFor(name, i),
+        isSelf: false,
+        role: "lead",
+        relationshipToYou: connected ? "connected" : "not_connected",
+        ...(connected ? { tieStrength: 0.35 + (i % 4) * 0.12 } : {}),
+      });
+      leadIds.push(id);
+    }
+
+    // Connectors, each bridging to a spread of leads. The first is a wide
+    // gatekeeper (the "Key" badge + a rich fan-out graph).
+    let edges = 0;
+    for (let c = 0; c < nConnectors; c++) {
+      const name = personName(nLeads + c);
+      const company = COMPANIES[(c + 5) % COMPANIES.length];
+      const title = CONNECTOR_TITLES[c % CONNECTOR_TITLES.length];
+      const fanout = c === 0 ? 12 : 2 + (c % 4);
+      const targets = new Set<Id<"persons">>();
+      for (let k = 0; k < fanout; k++) {
+        targets.add(leadIds[(c * 5 + k * 3) % leadIds.length]);
+      }
+      const connId = await ctx.db.insert("persons", {
+        name,
+        headline: `${title}, ex-${company}`,
+        company,
+        linkedinUrl: slugFor(name, nLeads + c),
+        isSelf: false,
+        role: "connector",
+        relationshipToYou: "connected",
+        tieStrength: 0.5 + (c % 5) * 0.1,
+        unlockValue: targets.size,
+      });
+      for (const to of targets) {
+        const ev = EVIDENCE[edges % EVIDENCE.length];
+        await ctx.db.insert("edges", {
+          from: connId,
+          to,
+          type: ev.type,
+          confidence: 0.55 + (edges % 4) * 0.1,
+          evidence: ev.make(company),
+        });
+        edges++;
+      }
+    }
+
+    return {
+      persons: nLeads + nConnectors + 1,
+      edges,
+      leads: nLeads,
+      connectors: nConnectors,
+    };
   },
 });
