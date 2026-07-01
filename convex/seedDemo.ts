@@ -1,14 +1,15 @@
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { DEMO_EMAIL } from "./devSeed";
 
 // Local demo-data loader. Maps seed/demo-data.json (the `zach/demo-data` contract)
 // into main's real Convex schema in ONE atomic pass, so the feed renders locally
-// with no OpenAI key. Public so the local Convex client in scripts/loadDemo.mjs
-// can reach it, but it can ONLY touch the demo account: every row is stamped with
-// the demo user's id and the wipe is scoped to that user, so real accounts are
-// unreachable from this path.
+// with no OpenAI key. INTERNAL — the demo surface is publicly readable (demo.ts),
+// so no anonymous caller may rewrite it; run via `npx convex run seedDemo:loadDemo`
+// (scripts/loadDemo.mjs wraps that). It can ONLY touch the demo account: every row
+// is stamped with the demo user's id and the wipe is scoped to that user, so real
+// accounts are unreachable from this path.
 //
 // Idempotent: clears the demo user's DOMAIN rows first (auth / users are NEVER
 // touched), so re-running re-seeds cleanly instead of duplicating.
@@ -80,7 +81,7 @@ function roleOf(roles: string[]): "lead" | "connector" {
   return roles.some((r) => CONNECTOR_ROLES.has(r)) ? "connector" : "lead";
 }
 
-export const loadDemo = mutation({
+export const loadDemo = internalMutation({
   args: { data: v.any() },
   returns: v.object({
     persons: v.number(),

@@ -1,6 +1,7 @@
 import { action } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { v } from "convex/values";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { Id } from "./_generated/dataModel";
 import { deriveIcp } from "./openai";
 
@@ -44,6 +45,11 @@ export const generate = action({
   },
   returns: v.object({ icpId: v.id("icp"), icpText: v.string() }),
   handler: async (ctx, args) => {
+    // Authenticate BEFORE any OpenAI/Firecrawl call: no anonymous caller may
+    // spend model credits. (saveIcp re-derives the user for the write.)
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Not authenticated");
+
     const audience = args.audience ?? "company";
     // Fallback goal when there is no site to scrape (or no key), framed by audience.
     let icpText =

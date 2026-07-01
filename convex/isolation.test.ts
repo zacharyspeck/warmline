@@ -267,15 +267,37 @@ test("denied: direct cross-user id lookups on every surface, and signed-out call
   ).rejects.toThrow(/Not authenticated/);
 });
 
-test("extension HTTP routes: anonymous callers never read or write a real user's graph", async () => {
+test("extension HTTP routes: anonymous callers are rejected outright; only the shared token reaches the demo graph", async () => {
   const t = convexTest(schema, modules);
   const A = await buildWorld(t, "alice@example.com", 0);
   // B's world exists purely as bait: none of it may surface below.
   await buildWorld(t, "bob@example.com", 500);
 
-  // With a shared token set, a missing or wrong bearer is rejected outright.
+  // Open deploy (no token set): anonymous calls are rejected, fail-closed. The
+  // demo graph is publicly READABLE (api.demo.*), so no anonymous path may
+  // write into it — and the rejected call must not even create the demo user.
+  const anonLeads = await t.fetch("/extension/leads", { method: "GET" });
+  expect(anonLeads.status).toBe(401);
+  const anonPost = await t.fetch("/extension/mutuals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      leadSlug: "x",
+      mutuals: [{ name: "Mutual One", slug: "mutual-one" }],
+    }),
+  });
+  expect(anonPost.status).toBe(401);
+  await t.run(async (ctx) => {
+    const demo = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", DEMO_EMAIL))
+      .unique();
+    expect(demo).toBeNull();
+  });
+
   vi.stubEnv("WARMLINE_EXTENSION_TOKEN", "secret");
   try {
+    // With the token set, a missing or wrong bearer is rejected outright.
     const leads401 = await t.fetch("/extension/leads", { method: "GET" });
     expect(leads401.status).toBe(401);
     const mutuals401 = await t.fetch("/extension/mutuals", {
@@ -287,78 +309,78 @@ test("extension HTTP routes: anonymous callers never read or write a real user's
       body: JSON.stringify({ leadSlug: "x", mutuals: [] }),
     });
     expect(mutuals401.status).toBe(401);
+
+    // A token-authorized POST whose leadSlug COLLIDES with one of A's leads:
+    // the write must land on the demo account as new rows, never patch A's graph.
+    const aLead = await t.run(async (ctx) => (await ctx.db.get(A.leadIds[0]))!);
+    const aEdgesBefore = await t.run(
+      async (ctx) =>
+        (
+          await ctx.db
+            .query("edges")
+            .withIndex("by_user", (q) => q.eq("userId", A.userId))
+            .collect()
+        ).length,
+    );
+    const postRes = await t.fetch("/extension/mutuals", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer secret",
+      },
+      body: JSON.stringify({
+        leadSlug: aLead.linkedinUrl,
+        leadName: aLead.name,
+        mutuals: [{ name: "Mutual One", slug: "mutual-one" }],
+      }),
+    });
+    expect(postRes.status).toBe(200);
+    expect(await postRes.json()).toEqual({ edges: 1 });
+
+    await t.run(async (ctx) => {
+      const demo = await ctx.db
+        .query("users")
+        .withIndex("email", (q) => q.eq("email", DEMO_EMAIL))
+        .unique();
+      expect(demo).not.toBeNull();
+      // Every row the route created belongs to the demo account.
+      const demoPersons = await ctx.db
+        .query("persons")
+        .withIndex("by_user", (q) => q.eq("userId", demo!._id))
+        .collect();
+      expect(demoPersons.map((p) => p.linkedinUrl).sort()).toEqual(
+        [aLead.linkedinUrl, "mutual-one"].sort(),
+      );
+      const demoEdges = await ctx.db
+        .query("edges")
+        .withIndex("by_user", (q) => q.eq("userId", demo!._id))
+        .collect();
+      expect(demoEdges.length).toBe(1);
+      // A's graph is untouched: same person doc, no status stamp, no new edges.
+      const aLeadAfter = await ctx.db.get(A.leadIds[0]);
+      expect(aLeadAfter?.userId).toBe(A.userId);
+      expect(aLeadAfter?.mutualsStatus).toBeUndefined();
+      const aPersons = await ctx.db
+        .query("persons")
+        .withIndex("by_user", (q) => q.eq("userId", A.userId))
+        .collect();
+      expect(aPersons.length).toBe(A.personIds.size);
+      const aEdges = await ctx.db
+        .query("edges")
+        .withIndex("by_user", (q) => q.eq("userId", A.userId))
+        .collect();
+      expect(aEdges.length).toBe(aEdgesBefore);
+    });
+
+    // The token-authorized pending-leads crawl serves ONLY the demo graph,
+    // whose one lead was just crawled ('done') — so nothing is pending, and in
+    // particular none of A's or B's dozens of uncrawled leads ever surface.
+    const pending = await t.fetch("/extension/leads", {
+      method: "GET",
+      headers: { Authorization: "Bearer secret" },
+    });
+    expect(await pending.json()).toEqual({ leads: [] });
   } finally {
     vi.unstubAllEnvs();
   }
-
-  // Open deploy, anonymous GET, no demo account yet: nothing to serve — and
-  // never A's or B's lead slugs.
-  const emptyRes = await t.fetch("/extension/leads", { method: "GET" });
-  expect(emptyRes.status).toBe(200);
-  expect(await emptyRes.json()).toEqual({ leads: [] });
-
-  // Anonymous POST whose leadSlug COLLIDES with one of A's leads: the write
-  // must land on the demo account as new rows, never patch A's graph.
-  const aLead = await t.run(async (ctx) => (await ctx.db.get(A.leadIds[0]))!);
-  const aEdgesBefore = await t.run(
-    async (ctx) =>
-      (
-        await ctx.db
-          .query("edges")
-          .withIndex("by_user", (q) => q.eq("userId", A.userId))
-          .collect()
-      ).length,
-  );
-  const postRes = await t.fetch("/extension/mutuals", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      leadSlug: aLead.linkedinUrl,
-      leadName: aLead.name,
-      mutuals: [{ name: "Mutual One", slug: "mutual-one" }],
-    }),
-  });
-  expect(postRes.status).toBe(200);
-  expect(await postRes.json()).toEqual({ edges: 1 });
-
-  await t.run(async (ctx) => {
-    const demo = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", DEMO_EMAIL))
-      .unique();
-    expect(demo).not.toBeNull();
-    // Every row the route created belongs to the demo account.
-    const demoPersons = await ctx.db
-      .query("persons")
-      .withIndex("by_user", (q) => q.eq("userId", demo!._id))
-      .collect();
-    expect(demoPersons.map((p) => p.linkedinUrl).sort()).toEqual(
-      [aLead.linkedinUrl, "mutual-one"].sort(),
-    );
-    const demoEdges = await ctx.db
-      .query("edges")
-      .withIndex("by_user", (q) => q.eq("userId", demo!._id))
-      .collect();
-    expect(demoEdges.length).toBe(1);
-    // A's graph is untouched: same person doc, no status stamp, no new edges.
-    const aLeadAfter = await ctx.db.get(A.leadIds[0]);
-    expect(aLeadAfter?.userId).toBe(A.userId);
-    expect(aLeadAfter?.mutualsStatus).toBeUndefined();
-    const aPersons = await ctx.db
-      .query("persons")
-      .withIndex("by_user", (q) => q.eq("userId", A.userId))
-      .collect();
-    expect(aPersons.length).toBe(A.personIds.size);
-    const aEdges = await ctx.db
-      .query("edges")
-      .withIndex("by_user", (q) => q.eq("userId", A.userId))
-      .collect();
-    expect(aEdges.length).toBe(aEdgesBefore);
-  });
-
-  // The pending-leads crawl serves ONLY the demo graph, whose one lead was
-  // just crawled ('done') — so nothing is pending, and in particular none of
-  // A's or B's dozens of uncrawled leads ever surface to the anonymous caller.
-  const pending = await t.fetch("/extension/leads", { method: "GET" });
-  expect(await pending.json()).toEqual({ leads: [] });
 });

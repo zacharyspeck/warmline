@@ -47,12 +47,26 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
               </span>
               <button
                 type="button"
-                onClick={() => void signOut()}
+                onClick={() =>
+                  void signOut().then(() => {
+                    // Re-render the server tree so "/" swaps to the demo landing.
+                    router.refresh();
+                  })
+                }
                 className="text-left text-sm text-foreground/60 transition-colors hover:text-foreground"
               >
                 Sign out
               </button>
             </div>
+          ) : me === null ? (
+            // Signed out (the demo landing): offer the way in.
+            <button
+              type="button"
+              onClick={() => router.push("/signin")}
+              className="px-3 py-1 text-left text-sm text-foreground/60 transition-colors hover:text-foreground"
+            >
+              Sign in
+            </button>
           ) : (
             <p className="px-3 py-1 text-sm text-foreground/60">Refreshed daily</p>
           )}

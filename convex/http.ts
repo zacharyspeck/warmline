@@ -47,13 +47,16 @@ http.route({
     if (!body.leadSlug) {
       return new Response("leadSlug required", { status: 400, headers: cors });
     }
-    // Optional shared-secret: if WARMLINE_EXTENSION_TOKEN is set on the deploy,
-    // require a matching Authorization: Bearer header. Unset → open (demo).
+    // Shared-secret gate, FAIL-CLOSED: writing into the demo account requires
+    // WARMLINE_EXTENSION_TOKEN to be set on the deploy AND a matching
+    // Authorization: Bearer header. Unset → anonymous callers are rejected;
+    // the demo graph is publicly readable (demo.ts), so no anonymous path may
+    // write into it.
     const token = process.env.WARMLINE_EXTENSION_TOKEN;
     const authz = req.headers.get("Authorization");
-    const tokenOk = !token || authz === `Bearer ${token}`;
+    const tokenOk = !!token && authz === `Bearer ${token}`;
     // A signed-in user's JWT scopes the write to their own graph; the shared
-    // token (or an open deploy) scopes it to the demo account.
+    // token scopes it to the demo account.
     const userId =
       (await authedUser(ctx)) ??
       (tokenOk
@@ -83,14 +86,15 @@ http.route({
   path: "/extension/leads",
   method: "GET",
   handler: httpAction(async (ctx, req) => {
+    // Same fail-closed gate as POST /extension/mutuals above.
     const token = process.env.WARMLINE_EXTENSION_TOKEN;
     const authz = req.headers.get("Authorization");
-    const tokenOk = !token || authz === `Bearer ${token}`;
+    const tokenOk = !!token && authz === `Bearer ${token}`;
     const userId =
       (await authedUser(ctx)) ??
       (tokenOk ? await ctx.runQuery(internal.devSeed.demoUserId, {}) : null);
     if (!userId) {
-      // No signed-in user and no demo account yet → nothing to crawl.
+      // Token-authorized but no demo account yet → nothing to crawl.
       if (tokenOk) return Response.json({ leads: [] }, { headers: cors });
       return new Response("unauthorized", { status: 401, headers: cors });
     }

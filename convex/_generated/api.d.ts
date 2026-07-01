@@ -13,6 +13,7 @@ import type * as authz from "../authz.js";
 import type * as avatars from "../avatars.js";
 import type * as connectors from "../connectors.js";
 import type * as crons from "../crons.js";
+import type * as demo from "../demo.js";
 import type * as devSeed from "../devSeed.js";
 import type * as edges from "../edges.js";
 import type * as extension from "../extension.js";
@@ -44,6 +45,7 @@ declare const fullApi: ApiFromModules<{
   avatars: typeof avatars;
   connectors: typeof connectors;
   crons: typeof crons;
+  demo: typeof demo;
   devSeed: typeof devSeed;
   edges: typeof edges;
   extension: typeof extension;

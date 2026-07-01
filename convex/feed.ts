@@ -17,7 +17,7 @@ const confidence = v.union(
   v.literal("low"),
 );
 
-const feedRow = v.object({
+export const feedRow = v.object({
   id: v.id("persons"),
   kind: v.union(v.literal("lead"), v.literal("connector")),
   gatekeeper: v.boolean(),
@@ -153,9 +153,14 @@ async function connectorHow(
   ];
 }
 
-// The feed for one explicit owner. Shared by the public query (owner = caller)
-// and the internal per-user paths (cron avatar enrichment).
-async function feedForUser(ctx: QueryCtx, userId: Id<"users">, limit: number) {
+// The feed for one explicit owner. Shared by the public query (owner = caller),
+// the internal per-user paths (cron avatar enrichment), and the logged-out demo
+// (demo.feed, owner = the demo account resolved server-side).
+export async function feedForUser(
+  ctx: QueryCtx,
+  userId: Id<"users">,
+  limit: number,
+) {
   const icp = await ctx.db
     .query("icp")
     .withIndex("by_user", (q) => q.eq("userId", userId))
@@ -256,8 +261,8 @@ export const list = query({
   args: { limit: v.optional(v.number()) },
   returns: v.array(feedRow),
   handler: async (ctx, args) => {
-    // Per-user feed: signed-out callers get nothing (the Phase D demo reads the
-    // demo account through a dedicated path, never this one).
+    // Per-user feed: signed-out callers get nothing (the logged-out demo reads
+    // the demo account through api.demo.feed, never this one).
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
     return await feedForUser(ctx, userId, args.limit ?? 25);
