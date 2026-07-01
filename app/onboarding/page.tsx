@@ -197,14 +197,14 @@ export default function Onboarding() {
                     i === PROCESSING_STEPS.length - 1 && step === PROCESSING_STEPS.length - 1
                       ? elapsed < 5
                         ? "Scoring your network against your ICP…"
-                        : `Still working — embedding takes ~1–2 min (${elapsed}s)`
+                        : `Still working, embedding takes about 1 to 2 min (${elapsed}s)`
                       : undefined
                   }
                 />
               ))}
             </ThinkingSteps>
             {step >= PROCESSING_STEPS.length && (
-              <p className="mt-3 text-sm font-medium text-foreground">Done — opening your feed…</p>
+              <p className="mt-3 text-sm font-medium text-foreground">Done, opening your feed…</p>
             )}
           </div>
         )}
@@ -309,7 +309,7 @@ function ConnectStep({
           exportUrl="https://www.linkedin.com/mypreferences/d/download-my-data"
           guide={[
             { text: "Select Download larger data archive (top option).", warn: "Second option won't include connections." },
-            { text: "Click Request archive — LinkedIn emails it in ~10 min." },
+            { text: "Click Request archive; LinkedIn emails it in about 10 min" },
           ]}
           onFile={(f) => onFileUpload("linkedin", f, true)}
         />
@@ -364,7 +364,7 @@ function ConnectStep({
         <Button onClick={onBuild} className="w-full">Build my network</Button>
         {connectedCount === 0 && (
           <p className="text-center text-xs text-muted-foreground">
-            No sources yet — you can connect them later in Settings.
+            No sources yet, you can connect them later in Settings
           </p>
         )}
       </div>

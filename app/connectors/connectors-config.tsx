@@ -182,7 +182,7 @@ export const CONNECTORS: ConnectorDef[] = [
     extension: {
       downloadUrl: "https://github.com/warmline/extension/releases/latest",
       intro:
-        "Mutual connections aren't exposed by any API — they're only visible in LinkedIn's logged-in UI. The extension reads them from profiles you open, in your own session.",
+        "Mutual connections aren't exposed by any API; they're only visible in LinkedIn's logged-in UI. The extension reads them from profiles you open, in your own session",
       steps: [
         { text: "Download the Warmline extension and unzip it." },
         {

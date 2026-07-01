@@ -95,8 +95,8 @@ export default function Home() {
           Who to reach out to
         </h1>
         <p className="mt-1.5 text-sm text-foreground/60">
-          Ranked by how warm the path is and how well they fit your goal —{" "}
-          <span className="text-foreground/80 font-medium">refreshed daily</span>.
+          Ranked by how warm the path is and how well they fit your goal,{" "}
+          <span className="text-foreground/80 font-medium">refreshed daily</span>
         </p>
       </header>
 
@@ -106,7 +106,7 @@ export default function Home() {
         </p>
       ) : rows.length === 0 ? (
         <p className="py-16 text-center text-sm text-muted-foreground">
-          No people yet — connect a source to load your network.
+          No people yet. Connect a source to load your network
         </p>
       ) : (
         <TooltipProvider delayDuration={150}>

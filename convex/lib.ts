@@ -55,6 +55,18 @@ export function normCompany(c?: string): string | undefined {
   return t.length ? t : undefined;
 }
 
+// Enforce the product copy rules on one line of generated text: no em or en
+// dashes, and no period ending the final sentence (an ellipsis, ? or ! is kept).
+// A safety net over the judge prompt so the feed's why/how/opener always comply.
+export function sanitizeCopy(s: string): string {
+  return s
+    .replace(/\s*[—–]\s*/g, ", ") // em/en dash → comma
+    .replace(/\s*,\s*,\s*/g, ", ") // collapse accidental double commas
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/([^.])\.\s*$/, "$1"); // drop a lone trailing period, keep "…"
+}
+
 // Feedback nudge: move `base` toward the centroid of up-voted vectors and away
 // from the centroid of down-voted vectors, by a bounded step `alpha`, then
 // renormalize to unit length. Cosine is scale-free, so this only changes the

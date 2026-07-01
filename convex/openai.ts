@@ -1,5 +1,7 @@
-// OpenAI client helpers (plain functions, called from actions). Uses fetch —
+// OpenAI client helpers (plain functions, called from actions). Uses fetch,
 // no SDK, no "use node". Needs OPENAI_API_KEY on the Convex deployment.
+
+import { sanitizeCopy } from "./lib";
 
 const EMBED_MODEL = "text-embedding-3-small"; // 1536 dims
 const CHAT_MODEL = "gpt-4o-mini";
@@ -68,13 +70,20 @@ export async function judge(input: {
 }): Promise<Judgement> {
   const sys =
     "You are a growth-engineering assistant. Given an ICP, a person, and any mutual connectors, output strict JSON " +
-    '{"why":[{"text","confidence"}],"how":["…","…","…"],"opener":"…"}. ' +
-    "why = exactly 3 short bullets on why they fit the ICP, each confidence high|medium|low, grounded ONLY in the facts. " +
-    "how = exactly 3 short, concrete bullets on HOW to connect with them — e.g. 'Ask <connector> for a warm intro (the evidence field explains how they know the lead)', " +
-    "'Meet them at an event they attend', 'Open with their work on X', 'Engage with their recent posts first'. " +
-    "When using a connector, cite the evidence verbatim to explain the connection — do NOT invent or negate company affiliations. " +
-    "Use the named connectors when given. opener = a 1-2 sentence drafted message referencing something real. " +
-    "Never invent facts. The opener is a draft, not sent.";
+    '{"why":[{"text":"...","confidence":"high|medium|low"}],"how":["...","...","..."],"opener":"..."}. ' +
+    "why = exactly 3 short bullets on why they fit the ICP, each with confidence high, medium, or low, grounded ONLY in the given facts. " +
+    "how = exactly 3 short, concrete bullets on how to connect with them (for example: ask a named connector for a warm intro and quote their evidence; open with their recent work; engage with a recent post first). " +
+    "When you use a connector, quote the evidence field to explain the connection, and never invent or contradict a company affiliation. " +
+    "Use the named connectors when they are given. opener = a 1 to 2 sentence draft message that references something real about them. " +
+    "Never invent facts. " +
+    "WRITING STYLE, follow exactly: use plain English with no buzzwords. " +
+    "Never use an em dash anywhere. " +
+    "Never phrase anything as a 'this, not that' contrast; state the positive point on its own. " +
+    "Write complete sentences with normal punctuation inside them, but do NOT end the last sentence of any why bullet, any how bullet, or the opener with a period. " +
+    'Good why bullet: "Leads growth at a Series B dev tools company that matches your ICP". ' +
+    'Bad why bullet: "A warm intro, not a cold email — clearly a strong fit." (it uses a not-contrast, an em dash, and a trailing period). ' +
+    'Good how bullet: "Ask Priya for a warm intro; she worked with them at Stripe". ' +
+    'Bad how bullet: "Leverage synergies and circle back to unlock alignment." (buzzwords and a trailing period).';
   const user = JSON.stringify(input);
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -97,10 +106,15 @@ export async function judge(input: {
     choices: { message: { content: string } }[];
   };
   const parsed = JSON.parse(data.choices[0].message.content) as Judgement;
-  // defensive shape
+  // defensive shape + copy-rule enforcement (no em dashes, no trailing periods)
   return {
-    why: Array.isArray(parsed.why) ? parsed.why.slice(0, 3) : [],
-    how: Array.isArray(parsed.how) ? parsed.how.slice(0, 3) : [],
-    opener: typeof parsed.opener === "string" ? parsed.opener : "",
+    why: (Array.isArray(parsed.why) ? parsed.why.slice(0, 3) : []).map((w) => ({
+      text: sanitizeCopy(String(w?.text ?? "")),
+      confidence: w?.confidence,
+    })),
+    how: (Array.isArray(parsed.how) ? parsed.how.slice(0, 3) : []).map((h) =>
+      sanitizeCopy(String(h)),
+    ),
+    opener: sanitizeCopy(typeof parsed.opener === "string" ? parsed.opener : ""),
   };
 }

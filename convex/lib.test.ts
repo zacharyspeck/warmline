@@ -8,6 +8,7 @@ import {
   feedScore,
   normCompany,
   nudgeVector,
+  sanitizeCopy,
 } from "./lib";
 
 test("cosine: identical vectors = 1, orthogonal = 0", () => {
@@ -58,6 +59,21 @@ test("normCompany: trims, empties → undefined", () => {
   expect(normCompany("  Stripe ")).toBe("Stripe");
   expect(normCompany("")).toBeUndefined();
   expect(normCompany(undefined)).toBeUndefined();
+});
+
+test("sanitizeCopy: no em dashes, no trailing period, keeps ellipsis", () => {
+  expect(sanitizeCopy("Strong fit — clear ICP match.")).toBe(
+    "Strong fit, clear ICP match",
+  );
+  expect(sanitizeCopy("Ask Priya for a warm intro")).toBe(
+    "Ask Priya for a warm intro",
+  );
+  expect(sanitizeCopy("Thinking…")).toBe("Thinking…");
+  // any dash is gone; the result has no em/en dash left
+  expect(sanitizeCopy("a — b – c")).not.toMatch(/[—–]/);
+  // a lone trailing period is dropped, question marks are kept
+  expect(sanitizeCopy("Are they hiring?")).toBe("Are they hiring?");
+  expect(sanitizeCopy("Great fit.")).toBe("Great fit");
 });
 
 test("nudgeVector: moves toward up-voted, away from down-voted, stays unit", () => {
