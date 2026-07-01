@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalAction, internalQuery } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
+import { CRON_JUDGE_PER_RUN } from "./limits";
 
 export const userIdPage = internalQuery({
   args: { paginationOpts: paginationOptsValidator },
@@ -37,7 +38,17 @@ export const refreshOneUser = internalAction({
     }
     try {
       const icp = await ctx.runQuery(internal.icp.latestForUser, { userId });
-      if (icp) await ctx.runAction(internal.rank.rebuild, { icpId: icp._id });
+      // Cost caps (Phase E): at most CRON_JUDGE_PER_RUN judge calls per user
+      // per run, judging only new or changed recommendations. Once the daily
+      // caps are hit, rebuild degrades to cached vectors and existing or
+      // heuristic copy WITHOUT throwing — so the cycle always completes and
+      // remaining users still get a refresh on cached data.
+      if (icp)
+        await ctx.runAction(internal.rank.rebuild, {
+          icpId: icp._id,
+          maxJudge: CRON_JUDGE_PER_RUN,
+          skipUnchanged: true,
+        });
     } catch (err) {
       console.error(`refreshOneUser: rank failed for ${userId}`, err);
     }

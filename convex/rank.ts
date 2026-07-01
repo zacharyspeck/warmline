@@ -20,12 +20,16 @@ const DEFAULT_JUDGE_TOP_N = 12;
 // How hard thumbs bend the ICP vector on each rank run. Bounded step in [0,1];
 // small so a few votes tilt the ranking without overwhelming the goal-fit.
 const VOTE_NUDGE = 0.15;
+// Scores closer than this count as "unchanged" for skipUnchanged. Scoring is
+// deterministic when nothing moved, so this only papers over float noise.
+const SCORE_EPSILON = 0.5;
 
 // One read with everything the ranker needs: icp + candidate leads + their vectors.
 export const rankData = internalQuery({
   args: { icpId: v.id("icp") },
   returns: v.union(
     v.object({
+      owner: v.id("users"),
       icpText: v.string(),
       icpVector: v.union(v.array(v.number()), v.null()),
       leads: v.array(
@@ -87,7 +91,12 @@ export const rankData = internalQuery({
         bestIntro,
       });
     }
-    return { icpText: icp.text, icpVector: icp.vector ?? null, leads };
+    return {
+      owner,
+      icpText: icp.text,
+      icpVector: icp.vector ?? null,
+      leads,
+    };
   },
 });
 
@@ -186,6 +195,38 @@ export const connectorsForLead = internalQuery({
   },
 });
 
+// This icp's current recommendations, keyed by person — lets the cron judge
+// only NEW or CHANGED rows, and lets a capped run keep a row's existing copy.
+export const existingRecs = internalQuery({
+  args: { icpId: v.id("icp") },
+  returns: v.array(
+    v.object({
+      personId: v.id("persons"),
+      score: v.number(),
+      judged: v.boolean(),
+      whyBullets: v.array(
+        v.object({ text: v.string(), confidence: v.number() }),
+      ),
+      how: v.array(v.string()),
+      opener: v.string(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const recs = await ctx.db
+      .query("recommendations")
+      .withIndex("by_icp_and_score", (q) => q.eq("icpId", args.icpId))
+      .take(200);
+    return recs.map((r) => ({
+      personId: r.personId,
+      score: r.score,
+      judged: r.judged ?? false,
+      whyBullets: r.whyBullets,
+      how: r.how,
+      opener: r.opener,
+    }));
+  },
+});
+
 export const writeRecommendation = internalMutation({
   args: {
     icpId: v.id("icp"),
@@ -200,6 +241,9 @@ export const writeRecommendation = internalMutation({
     how: v.array(v.string()),
     opener: v.string(),
     unlocksIds: v.array(v.id("persons")),
+    // True only when why/how/opener came from the judge AT this score; absent
+    // or false marks heuristic/carried-over copy the cron may re-judge.
+    judged: v.optional(v.boolean()),
   },
   returns: v.id("recommendations"),
   handler: async (ctx, args) => {
@@ -227,6 +271,7 @@ export const writeRecommendation = internalMutation({
       how: args.how,
       opener: args.opener,
       unlocksIds: args.unlocksIds,
+      judged: args.judged ?? false,
     });
   },
 });
@@ -234,49 +279,126 @@ export const writeRecommendation = internalMutation({
 const confNum = (c: "high" | "medium" | "low") =>
   c === "high" ? 0.9 : c === "medium" ? 0.6 : 0.3;
 
-// The ranking pipeline: embed → goal-fit × reachability → judge top N → write recs.
+// Degraded copy for a capped judge slot: plain heuristic why/how built from
+// the lead's own fields, mirroring the feed's fallback style (no em dashes,
+// no trailing periods).
+function heuristicCopy(lead: {
+  headline: string | null;
+  company: string | null;
+  relationshipToYou: "connected" | "not_connected";
+}): { whyBullets: { text: string; confidence: number }[]; how: string[] } {
+  const whyBullets: { text: string; confidence: number }[] = [];
+  const facts = [lead.headline, lead.company].filter(Boolean).join(" · ");
+  if (facts) whyBullets.push({ text: facts, confidence: 0.9 });
+  whyBullets.push({
+    text:
+      lead.relationshipToYou === "connected"
+        ? "Already in your network"
+        : "Reachable through a warm intro",
+    confidence: 0.6,
+  });
+  const how =
+    lead.relationshipToYou === "connected"
+      ? ["Reach out directly via LinkedIn or email"]
+      : ["Ask a mutual connection for a warm intro"];
+  return { whyBullets, how };
+}
+
+// The ranking pipeline: embed → goal-fit × reachability → judge top N → write
+// recs. Every OpenAI call is RESERVED first (usage.reserve, convex/limits.ts);
+// a cap hit DEGRADES instead of throwing:
+//   • icp embed capped   → rank on reachability alone (neutral goal-fit)
+//   • lead embeds capped → cached vectors keep their goal-fit, the uncached
+//     score neutral; nothing is embedded past the grant
+//   • judge capped       → the recommendation is still written, with its
+//     existing copy (score refreshed) or plain heuristic why/how
+// so a fully capped rebuild still completes and the cron never errors on caps.
 export const rebuild = internalAction({
-  args: { icpId: v.id("icp"), judgeTopN: v.optional(v.number()) },
-  returns: v.object({ scored: v.number(), judged: v.number() }),
+  args: {
+    icpId: v.id("icp"),
+    judgeTopN: v.optional(v.number()),
+    // Per-RUN ceiling on judge reservations (the cron passes
+    // limits.CRON_JUDGE_PER_RUN so one run can't drain a day's budget).
+    maxJudge: v.optional(v.number()),
+    // Skip judging leads whose existing rec is judged copy at an unchanged
+    // score — the cron's "only new or changed" rule.
+    skipUnchanged: v.optional(v.boolean()),
+  },
+  returns: v.object({
+    scored: v.number(),
+    judged: v.number(),
+    judgeDegraded: v.number(), // capped judge slots that fell back to copy
+    embedsSkipped: v.number(), // capped embeds that kept cache/neutral fit
+  }),
   handler: async (ctx, args) => {
     const data = await ctx.runQuery(internal.rank.rankData, {
       icpId: args.icpId,
     });
     if (!data) throw new Error("icp not found");
+    const owner = data.owner;
+    let embedsSkipped = 0;
 
-    // ensure ICP vector
+    // ensure ICP vector — one reserved embed
     let icpVector = data.icpVector;
     if (!icpVector) {
-      icpVector = await embed(data.icpText);
-      await ctx.runMutation(internal.icp.setVector, {
-        icpId: args.icpId,
-        vector: icpVector,
+      const { granted } = await ctx.runMutation(internal.usage.reserve, {
+        userId: owner,
+        category: "embed",
+        count: 1,
       });
+      if (granted > 0) {
+        icpVector = await embed(data.icpText);
+        await ctx.runMutation(internal.icp.setVector, {
+          icpId: args.icpId,
+          vector: icpVector,
+        });
+      } else {
+        embedsSkipped++;
+      }
     }
 
     // Bend the ICP vector by this ICP's thumbs (toward up-votes, away from
     // down-votes) using cached person vectors. This is a per-run scoring vector,
     // not persisted — icp.vector stays the derived baseline. The shift lands on
     // THIS run, which is why votes reshape the feed on the next rank, not on click.
-    const { up, down } = await ctx.runQuery(internal.rank.voteVectors, {
-      icpId: args.icpId,
-    });
-    const scoringVector =
-      up.length || down.length
-        ? nudgeVector(icpVector, up, down, VOTE_NUDGE)
-        : icpVector;
+    let scoringVector: number[] | null = icpVector;
+    if (icpVector) {
+      const { up, down } = await ctx.runQuery(internal.rank.voteVectors, {
+        icpId: args.icpId,
+      });
+      scoringVector =
+        up.length || down.length
+          ? nudgeVector(icpVector, up, down, VOTE_NUDGE)
+          : icpVector;
+    }
 
-    // score each candidate; embed leads missing a vector
+    // Reserve embeds for the leads missing a vector in ONE batch; leads past
+    // the grant keep no vector this run and score with a neutral goal-fit.
+    const missingVectors = data.leads.filter((l) => !l.vector).length;
+    let embedBudget = 0;
+    if (missingVectors > 0) {
+      const { granted } = await ctx.runMutation(internal.usage.reserve, {
+        userId: owner,
+        category: "embed",
+        count: missingVectors,
+      });
+      embedBudget = granted;
+      embedsSkipped += missingVectors - granted;
+    }
+
+    // score each candidate; embed leads missing a vector while budget lasts
     const scored: {
       id: Id<"persons">;
       name: string;
       headline: string | null;
       company: string | null;
+      relationshipToYou: "connected" | "not_connected";
       score: number;
     }[] = [];
     for (const lead of data.leads) {
       let vec = lead.vector;
-      if (!vec) {
+      if (!vec && embedBudget > 0) {
+        embedBudget--;
         const text = [lead.name, lead.headline, lead.company]
           .filter(Boolean)
           .join(" — ");
@@ -286,7 +408,10 @@ export const rebuild = internalAction({
           embedding: vec,
         });
       }
-      const goalFit = (cosine(vec, scoringVector) + 1) / 2; // [-1,1] → [0,1]
+      // Neutral goal-fit when either vector is unavailable (capped): the lead
+      // still ranks on reachability rather than dropping out of the feed.
+      const goalFit =
+        vec && scoringVector ? (cosine(vec, scoringVector) + 1) / 2 : 0.5;
       // Warm-reachability = the best connector path into this lead (the whole
       // point), or directness if you happen to already know them.
       const reach = Math.max(
@@ -298,45 +423,103 @@ export const rebuild = internalAction({
         name: lead.name,
         headline: lead.headline,
         company: lead.company,
+        relationshipToYou: lead.relationshipToYou,
         score: feedScore(goalFit, reach),
       });
     }
     scored.sort((a, b) => b.score - a.score);
 
-    // judge the top N
+    // judge the top N — but only NEW or CHANGED rows when skipUnchanged, and
+    // never more than maxJudge reservations this run
     const topN = args.judgeTopN ?? DEFAULT_JUDGE_TOP_N;
     const top = scored.slice(0, topN);
-    let judged = 0;
+    const prior = new Map(
+      (
+        await ctx.runQuery(internal.rank.existingRecs, { icpId: args.icpId })
+      ).map((r) => [r.personId, r]),
+    );
+
+    const candidates = [];
     for (const lead of top) {
-      const connectors = await ctx.runQuery(internal.rank.connectorsForLead, {
-        leadId: lead.id,
-      });
-      const j = await judge({
-        icpText: data.icpText,
-        person: {
-          name: lead.name,
-          headline: lead.headline ?? undefined,
-          company: lead.company ?? undefined,
-        },
-        connectors: connectors.map((c) => ({
-          name: c.name,
-          evidence: c.evidence,
-        })),
-      });
-      await ctx.runMutation(internal.rank.writeRecommendation, {
-        icpId: args.icpId,
-        personId: lead.id,
-        score: lead.score,
-        whyBullets: j.why.map((w) => ({
-          text: w.text,
-          confidence: confNum(w.confidence),
-        })),
-        how: j.how,
-        opener: j.opener,
-        unlocksIds: [],
-      });
-      judged++;
+      const ex = prior.get(lead.id);
+      if (
+        args.skipUnchanged &&
+        ex &&
+        ex.judged &&
+        Math.abs(ex.score - lead.score) <= SCORE_EPSILON
+      ) {
+        // Judged copy at an unchanged score: leave the row entirely alone.
+        continue;
+      }
+      candidates.push(lead);
     }
-    return { scored: scored.length, judged };
+
+    let judgeBudget = 0;
+    if (candidates.length > 0) {
+      const want = Math.min(candidates.length, args.maxJudge ?? candidates.length);
+      if (want > 0) {
+        const { granted } = await ctx.runMutation(internal.usage.reserve, {
+          userId: owner,
+          category: "judge",
+          count: want,
+        });
+        judgeBudget = granted;
+      }
+    }
+
+    let judged = 0;
+    let judgeDegraded = 0;
+    for (const lead of candidates) {
+      if (judgeBudget > 0) {
+        judgeBudget--;
+        const connectors = await ctx.runQuery(internal.rank.connectorsForLead, {
+          leadId: lead.id,
+        });
+        const j = await judge({
+          icpText: data.icpText,
+          person: {
+            name: lead.name,
+            headline: lead.headline ?? undefined,
+            company: lead.company ?? undefined,
+          },
+          connectors: connectors.map((c) => ({
+            name: c.name,
+            evidence: c.evidence,
+          })),
+        });
+        await ctx.runMutation(internal.rank.writeRecommendation, {
+          icpId: args.icpId,
+          personId: lead.id,
+          score: lead.score,
+          whyBullets: j.why.map((w) => ({
+            text: w.text,
+            confidence: confNum(w.confidence),
+          })),
+          how: j.how,
+          opener: j.opener,
+          unlocksIds: [],
+          judged: true,
+        });
+        judged++;
+      } else {
+        // Cap hit: keep the row in the feed. Existing copy if the rec already
+        // exists, plain heuristic copy if it's new. judged:false marks it for
+        // a re-judge when budget returns.
+        const ex = prior.get(lead.id);
+        const fallback = heuristicCopy(lead);
+        await ctx.runMutation(internal.rank.writeRecommendation, {
+          icpId: args.icpId,
+          personId: lead.id,
+          score: lead.score,
+          whyBullets: ex ? ex.whyBullets : fallback.whyBullets,
+          how: ex ? ex.how : fallback.how,
+          opener: ex?.opener ?? "",
+          unlocksIds: [],
+          judged: false,
+        });
+        judgeDegraded++;
+      }
+    }
+    return { scored: scored.length, judged, judgeDegraded, embedsSkipped };
   },
 });

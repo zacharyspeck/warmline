@@ -66,7 +66,9 @@ export const setVector = internalMutation({
 // Embed the ICP text into a vector (OpenAI). Run once after saveIcp. Requires
 // an authenticated caller who OWNS the icp: this is a public action that both
 // spends OpenAI credits and rewrites the icp's ranking vector, so an anonymous
-// or cross-user call is denied before any model call.
+// or cross-user call is denied before any model call. The embed itself is
+// budget-reserved (usage.reserve); on a cap hit it degrades to a no-op —
+// dims 0, the cached vector (if any) untouched — instead of throwing.
 export const embedIcp = action({
   args: { icpId: v.id("icp") },
   returns: v.object({ dims: v.number() }),
@@ -78,6 +80,12 @@ export const embedIcp = action({
       userId,
     });
     if (!icp) throw new Error("icp not found");
+    const { granted } = await ctx.runMutation(internal.usage.reserve, {
+      userId,
+      category: "embed",
+      count: 1,
+    });
+    if (granted === 0) return { dims: 0 };
     const vector = await embed(icp.text);
     await ctx.runMutation(internal.icp.setVector, {
       icpId: args.icpId,

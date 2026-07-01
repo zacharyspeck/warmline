@@ -57,10 +57,20 @@ export const generate = action({
         ? "People one step ahead in my field who can make a warm introduction"
         : "Growth and GTM engineers building with AI";
     if (args.website) {
-      const md = await scrapeSite(args.website);
-      if (md) {
-        const derived = await deriveIcp(md, audience);
-        if (derived) icpText = derived;
+      // One scrape unit = the Firecrawl fetch + its paired deriveIcp chat
+      // call. Reserved before either happens; a cap hit falls back to the
+      // audience-framed goal above, exactly like a missing key — no throw.
+      const { granted } = await ctx.runMutation(internal.usage.reserve, {
+        userId,
+        category: "scrape",
+        count: 1,
+      });
+      if (granted > 0) {
+        const md = await scrapeSite(args.website);
+        if (md) {
+          const derived = await deriveIcp(md, audience);
+          if (derived) icpText = derived;
+        }
       }
     }
 
