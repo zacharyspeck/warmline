@@ -7,10 +7,13 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { embed, judge } from "./openai";
-import { cosine, reachability, feedScore, introScore } from "./lib";
+import { cosine, reachability, feedScore, introScore, nudgeVector } from "./lib";
 
 const CANDIDATE_LIMIT = 120;
 const DEFAULT_JUDGE_TOP_N = 12;
+// How hard thumbs bend the ICP vector on each rank run. Bounded step in [0,1];
+// small so a few votes tilt the ranking without overwhelming the goal-fit.
+const VOTE_NUDGE = 0.15;
 
 // One read with everything the ranker needs: icp + candidate leads + their vectors.
 export const rankData = internalQuery({
@@ -73,6 +76,33 @@ export const rankData = internalQuery({
       });
     }
     return { icpText: icp.text, icpVector: icp.vector ?? null, leads };
+  },
+});
+
+// The ICP's thumbs, joined to already-cached person embeddings. No OpenAI calls:
+// people without a cached vector are skipped. Feeds the nudge in `rebuild`.
+export const voteVectors = internalQuery({
+  args: { icpId: v.id("icp") },
+  returns: v.object({
+    up: v.array(v.array(v.number())),
+    down: v.array(v.array(v.number())),
+  }),
+  handler: async (ctx, args) => {
+    const votes = await ctx.db
+      .query("feedback")
+      .withIndex("by_icp", (q) => q.eq("icpId", args.icpId))
+      .take(500);
+    const up: number[][] = [];
+    const down: number[][] = [];
+    for (const f of votes) {
+      const vec = await ctx.db
+        .query("personVectors")
+        .withIndex("by_person", (q) => q.eq("personId", f.personId))
+        .first();
+      if (!vec) continue;
+      (f.vote === "up" ? up : down).push(vec.embedding);
+    }
+    return { up, down };
   },
 });
 
@@ -192,6 +222,18 @@ export const rebuild = internalAction({
       });
     }
 
+    // Bend the ICP vector by this ICP's thumbs (toward up-votes, away from
+    // down-votes) using cached person vectors. This is a per-run scoring vector,
+    // not persisted — icp.vector stays the derived baseline. The shift lands on
+    // THIS run, which is why votes reshape the feed on the next rank, not on click.
+    const { up, down } = await ctx.runQuery(internal.rank.voteVectors, {
+      icpId: args.icpId,
+    });
+    const scoringVector =
+      up.length || down.length
+        ? nudgeVector(icpVector, up, down, VOTE_NUDGE)
+        : icpVector;
+
     // score each candidate; embed leads missing a vector
     const scored: {
       id: Id<"persons">;
@@ -212,7 +254,7 @@ export const rebuild = internalAction({
           embedding: vec,
         });
       }
-      const goalFit = (cosine(vec, icpVector) + 1) / 2; // [-1,1] → [0,1]
+      const goalFit = (cosine(vec, scoringVector) + 1) / 2; // [-1,1] → [0,1]
       // Warm-reachability = the best connector path into this lead (the whole
       // point), or directness if you happen to already know them.
       const reach = Math.max(

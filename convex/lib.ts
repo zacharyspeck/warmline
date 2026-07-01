@@ -54,3 +54,37 @@ export function normCompany(c?: string): string | undefined {
   const t = (c ?? "").trim();
   return t.length ? t : undefined;
 }
+
+// Feedback nudge: move `base` toward the centroid of up-voted vectors and away
+// from the centroid of down-voted vectors, by a bounded step `alpha`, then
+// renormalize to unit length. Cosine is scale-free, so this only changes the
+// DIRECTION of the ICP vector — pulling it nearer people you liked and further
+// from people you rejected. Pure + deterministic so it unit-tests directly.
+export function nudgeVector(
+  base: number[],
+  up: number[][],
+  down: number[][],
+  alpha: number,
+): number[] {
+  const dim = base.length;
+  const centroid = (vs: number[][]): number[] | null => {
+    if (vs.length === 0) return null;
+    const acc = new Array(dim).fill(0);
+    for (const v of vs) {
+      for (let i = 0; i < dim; i++) acc[i] += v[i] ?? 0;
+    }
+    for (let i = 0; i < dim; i++) acc[i] /= vs.length;
+    return acc;
+  };
+  const upC = centroid(up);
+  const downC = centroid(down);
+  const out = base.slice();
+  for (let i = 0; i < dim; i++) {
+    if (upC) out[i] += alpha * (upC[i] - base[i]);
+    if (downC) out[i] += alpha * (base[i] - downC[i]);
+  }
+  let norm = 0;
+  for (let i = 0; i < dim; i++) norm += out[i] * out[i];
+  norm = Math.sqrt(norm);
+  return norm === 0 ? base.slice() : out.map((x) => x / norm);
+}

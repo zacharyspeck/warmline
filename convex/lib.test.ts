@@ -7,6 +7,7 @@ import {
   introScore,
   feedScore,
   normCompany,
+  nudgeVector,
 } from "./lib";
 
 test("cosine: identical vectors = 1, orthogonal = 0", () => {
@@ -57,4 +58,40 @@ test("normCompany: trims, empties → undefined", () => {
   expect(normCompany("  Stripe ")).toBe("Stripe");
   expect(normCompany("")).toBeUndefined();
   expect(normCompany(undefined)).toBeUndefined();
+});
+
+test("nudgeVector: moves toward up-voted, away from down-voted, stays unit", () => {
+  const base = [1, 0, 0];
+  const up = [0, 1, 0];
+  const down = [0, 0, 1];
+  const nudged = nudgeVector(base, [up], [down], 0.2);
+
+  // closer to the up-voted direction, further from the down-voted one
+  expect(cosine(nudged, up)).toBeGreaterThan(cosine(base, up));
+  expect(cosine(nudged, down)).toBeLessThan(cosine(base, down));
+  // renormalized
+  expect(cosine(nudged, nudged)).toBeCloseTo(1);
+});
+
+test("nudgeVector: a down-voted-similar lead's goal-fit (and score) drops", () => {
+  const icp = [1, 0, 0];
+  const downVec = [0, 0, 1];
+  const leadLikeDown = [0, 0, 1]; // a candidate that looks like what you rejected
+
+  const goalFit = (v: number[]) => (cosine(leadLikeDown, v) + 1) / 2;
+  const before = goalFit(icp);
+  const nudged = nudgeVector(icp, [], [downVec], 0.2);
+  const after = goalFit(nudged);
+
+  expect(after).toBeLessThan(before);
+  // same reachability → the blended feed score drops too
+  expect(feedScore(after, 0.5)).toBeLessThan(feedScore(before, 0.5));
+});
+
+test("nudgeVector: no votes returns a unit-normalized base (no drift)", () => {
+  const base = [3, 4]; // not unit length
+  const out = nudgeVector(base, [], [], 0.2);
+  // direction preserved, magnitude normalized
+  expect(cosine(out, base)).toBeCloseTo(1);
+  expect(Math.hypot(...out)).toBeCloseTo(1);
 });
