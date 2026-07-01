@@ -114,6 +114,7 @@ export default function Home() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[210px]">Person</TableHead>
+                <TableHead className="w-[104px]">Relevance</TableHead>
                 <TableHead className="min-w-[300px]">Why</TableHead>
                 <TableHead className="min-w-[240px]">How</TableHead>
                 <TableHead className="w-[100px]">Mutuals</TableHead>
@@ -250,6 +251,29 @@ function FeedRowView({
           </div>
         </TableCell>
 
+        {/* Relevance — the ranker's 0–100 score, read straight from the row */}
+        <TableCell className="align-top">
+          <div
+            className="flex items-center gap-2"
+            title={`Relevance ${row.score} of 100`}
+          >
+            <span className="text-sm font-semibold tabular-nums text-foreground">
+              {row.score}
+            </span>
+            <div
+              className="h-1.5 w-10 overflow-hidden rounded-full bg-muted"
+              aria-hidden
+            >
+              <div
+                className="h-full rounded-full bg-primary"
+                style={{
+                  width: `${Math.max(0, Math.min(100, row.score))}%`,
+                }}
+              />
+            </div>
+          </div>
+        </TableCell>
+
         {/* Why */}
         <TableCell className="align-top">
           <ul className="space-y-1.5">
@@ -344,7 +368,7 @@ function FeedRowView({
 
       {expanded && (
         <TableRow>
-          <TableCell colSpan={5} className="bg-muted/10 p-3">
+          <TableCell colSpan={6} className="bg-muted/10 p-3">
             {row.opener ? (
               <div className="mb-3 rounded-lg border border-border bg-card p-3 [box-shadow:var(--shadow-s)]">
                 <div className="mb-1 text-xs font-medium text-muted-foreground">
