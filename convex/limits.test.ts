@@ -6,7 +6,7 @@
 // a throw-and-count fetch (proving zero calls regardless of the runner's
 // env) or stubs fetch with a fake response and counts the calls.
 import { convexTest, type TestConvex } from "convex-test";
-import { expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
 import { Id } from "./_generated/dataModel";
@@ -18,6 +18,19 @@ import {
 } from "./limits";
 
 const modules = import.meta.glob("./**/*.ts");
+
+// Pin the clock mid-day UTC for every test in this file: usage.reserve
+// recomputes dayKey(Date.now()) on its own, so a real-clock UTC-midnight
+// rollover mid-test (5pm in Phoenix) would hand the run a fresh day of budget
+// and flake the cap assertions. Only Date is faked — real timers keep
+// convex-test's async machinery live.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-07-01T12:00:00Z"));
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 // personVectors carries a 1536-dim vector index — build full-width sparse vectors.
 const DIM = 1536;
