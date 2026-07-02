@@ -44,11 +44,23 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
               onClick={() => router.push("/")}
             />
             {me ? (
-              <SidebarItem
-                label="Settings"
-                active={pathname === "/settings"}
-                onClick={() => router.push("/settings")}
-              />
+              <>
+                <SidebarItem
+                  label="Connectors"
+                  active={pathname === "/connectors"}
+                  onClick={() => router.push("/connectors")}
+                />
+                <SidebarItem
+                  label="Onboarding"
+                  active={pathname === "/onboarding"}
+                  onClick={() => router.push("/onboarding")}
+                />
+                <SidebarItem
+                  label="Settings"
+                  active={pathname === "/settings"}
+                  onClick={() => router.push("/settings")}
+                />
+              </>
             ) : null}
           </SidebarGroup>
         </SidebarContent>
