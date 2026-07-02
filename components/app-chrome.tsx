@@ -33,7 +33,8 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
     pathname === "/onboarding" ||
     pathname === "/signin" ||
     pathname === "/privacy" ||
-    pathname === "/terms"
+    pathname === "/terms" ||
+    pathname === "/pricing"
   )
     return <>{children}</>;
 

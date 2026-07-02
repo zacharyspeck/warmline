@@ -140,7 +140,12 @@ async function purgePass(
   // via the by_user_and_day prefix, which sweeps ALL days). Connectors are
   // handled above because their storage blob must go first.
   type PurgeId = Id<
-    "recommendations" | "attendance" | "edges" | "events" | "usage"
+    | "recommendations"
+    | "attendance"
+    | "edges"
+    | "events"
+    | "usage"
+    | "upgradeRequests"
   >;
   const pagers: Array<() => Promise<Array<{ _id: PurgeId }>>> = [
     () =>
@@ -167,6 +172,11 @@ async function purgePass(
       ctx.db
         .query("usage")
         .withIndex("by_user_and_day", (q) => q.eq("userId", userId))
+        .take(100),
+    () =>
+      ctx.db
+        .query("upgradeRequests")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
         .take(100),
   ];
   for (const nextPage of pagers) {

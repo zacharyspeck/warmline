@@ -34,6 +34,7 @@ import type * as openai from "../openai.js";
 import type * as rank from "../rank.js";
 import type * as resolve from "../resolve.js";
 import type * as seedDemo from "../seedDemo.js";
+import type * as upgrade from "../upgrade.js";
 import type * as usage from "../usage.js";
 
 import type {
@@ -69,6 +70,7 @@ declare const fullApi: ApiFromModules<{
   rank: typeof rank;
   resolve: typeof resolve;
   seedDemo: typeof seedDemo;
+  upgrade: typeof upgrade;
   usage: typeof usage;
 }>;
 

@@ -664,6 +664,12 @@ async function ownedCounts(t: Tester, userId: Id<"users">) {
           .withIndex("by_user_and_day", (q) => q.eq("userId", userId))
           .collect()
       ).length,
+      upgradeRequests: (
+        await ctx.db
+          .query("upgradeRequests")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect()
+      ).length,
       sessions: (
         await ctx.db
           .query("authSessions")
@@ -734,8 +740,9 @@ test("delete-my-data: A's purge removes every A row and none of B's; anonymous, 
         code: `code-${uid}`,
         expirationTime: Date.now() + 86_400_000,
       });
-      // seedNetwork creates no events or attendance: seed one of each so the
-      // all-zero-after assertions can't pass vacuously for those tables.
+      // seedNetwork creates no events, attendance, or upgrade requests: seed
+      // them so the all-zero-after assertions can't pass vacuously.
+      await ctx.db.insert("upgradeRequests", { userId: uid, plan: "pro" });
       const eventId = await ctx.db.insert("events", {
         userId: uid,
         name: "Demo Day",
@@ -819,6 +826,7 @@ test("delete-my-data: A's purge removes every A row and none of B's; anonymous, 
     "icp",
     "connectors",
     "usage",
+    "upgradeRequests",
     "sessions",
     "accounts",
     "userRow",

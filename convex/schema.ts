@@ -67,6 +67,14 @@ export default defineSchema({
     scrape: v.number(),
   }).index("by_day", ["day"]),
 
+  // Pricing-page "Request access" rows (no payment processing; the owner
+  // follows up by hand). One row per user per plan; purged by delete-my-data
+  // like every user-owned table.
+  upgradeRequests: defineTable({
+    userId: v.id("users"),
+    plan: v.union(v.literal("pro"), v.literal("team")),
+  }).index("by_user", ["userId"]),
+
   // A source the user has linked to make their network searchable.
   // OAuth providers store an accountEmail; manual/auto exports store a
   // fileName + human label (e.g. "LinkedIn data").
