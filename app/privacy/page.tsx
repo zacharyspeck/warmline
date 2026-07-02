@@ -57,8 +57,9 @@ export default function Privacy() {
         </li>
         <li>
           Scrape your accounts or read your messages. Warmline sees only what
-          you choose to import or connect, and its connector permissions
-          cover contacts and calendar access only
+          you choose to import or connect; its connector permissions are
+          limited to contacts, calendar, and the connected account&apos;s
+          basic identity, with no mail access of any kind
         </li>
         <li>Sell your data or share it with advertisers</li>
         <li>
