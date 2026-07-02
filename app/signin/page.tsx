@@ -6,16 +6,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { WarmlineLockup } from "@/components/warmline-mark";
 
+// S1: full-window, centered, nothing extraneous — the W lockup, one dark card,
+// a single amber primary button, and a quiet toggle between the two states.
+// Deliberate departures from the reference (design/screens/warmline-S1):
+//   • no "Continue with Google" — email and password is the only login flow
+//     until the OAuth phase (see the marker below)
+//   • no "Forgot?" link — no reset flow exists yet (MANUAL_TODO)
+//   • the invite-code field stays on Create account — signup is gated
 export default function SignIn() {
   const { signIn } = useAuthActions();
   const [flow, setFlow] = useState<"signIn" | "signUp">("signIn");
@@ -24,24 +25,23 @@ export default function SignIn() {
   const router = useRouter();
 
   return (
-    <div className="mx-auto flex h-screen w-full max-w-md flex-col justify-center gap-8 px-4">
-      <div className="flex flex-col items-center gap-3 text-center">
-        <span className="text-2xl font-semibold tracking-tight">Warmline</span>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          Who to reach out to, and why. Sign in to see your feed
-        </p>
-      </div>
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
+      <div className="w-full max-w-md">
+        <div className="rounded-2xl border border-border bg-card px-8 py-10 [box-shadow:var(--shadow-l,0_20px_50px_rgb(0_0_0/0.35))]">
+          <div className="mb-8 flex flex-col items-center gap-5 text-center">
+            <WarmlineLockup markClassName="size-6" />
+            <div>
+              <h1 className="font-display text-[26px] font-semibold tracking-tight text-foreground">
+                {flow === "signIn" ? "Welcome back" : "Create your account"}
+              </h1>
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                {flow === "signIn"
+                  ? "Sign in to your warm network"
+                  : "Start seeing who to reach out to"}
+              </p>
+            </div>
+          </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{flow === "signIn" ? "Sign in" : "Create account"}</CardTitle>
-          <CardDescription>
-            {flow === "signIn"
-              ? "Pick up where you left off"
-              : "Surface warm intros for your goal"}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
           <form
             className="flex flex-col gap-4"
             onSubmit={(e) => {
@@ -86,13 +86,15 @@ export default function SignIn() {
                 type="password"
                 name="password"
                 placeholder="••••••••"
-                autoComplete={flow === "signIn" ? "current-password" : "new-password"}
+                autoComplete={
+                  flow === "signIn" ? "current-password" : "new-password"
+                }
                 minLength={8}
                 required
               />
               {flow === "signUp" && (
                 <p className="px-1 text-xs text-muted-foreground">
-                  Password must be at least 8 characters
+                  At least 8 characters
                 </p>
               )}
             </div>
@@ -114,25 +116,56 @@ export default function SignIn() {
               </div>
             )}
 
-            <Button type="submit" variant="primary" disabled={loading} className="mt-1">
-              {loading ? "Loading…" : flow === "signIn" ? "Sign in" : "Sign up"}
-            </Button>
-
             {/* OAuth sign-in ("Continue with Google") returns HERE in the
-                OAuth phase, as a divider + provider button above this footer.
+                OAuth phase, as a divider + provider button above the submit.
                 Email and password is the ONLY login flow until then; the
                 Google/Outlook OAuth under app/api/connectors is data-source
                 permission, not login, and stays. */}
-            <div className="flex flex-row justify-center gap-2 text-sm">
+
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={loading}
+              className="mt-1 h-11 w-full text-[15px]"
+            >
+              {loading
+                ? "Loading…"
+                : flow === "signIn"
+                  ? "Sign in"
+                  : "Create account"}
+            </Button>
+
+            {flow === "signUp" && (
+              <p className="text-center text-xs text-muted-foreground">
+                By continuing you agree to our{" "}
+                <Link
+                  href="/terms"
+                  className="underline underline-offset-4 hover:text-foreground"
+                >
+                  Terms
+                </Link>{" "}
+                and{" "}
+                <Link
+                  href="/privacy"
+                  className="underline underline-offset-4 hover:text-foreground"
+                >
+                  Privacy Policy
+                </Link>
+              </p>
+            )}
+
+            <div className="mt-1 flex flex-row justify-center gap-2 text-sm">
               <span className="text-muted-foreground">
-                {flow === "signIn" ? "Don't have an account?" : "Already have an account?"}
+                {flow === "signIn"
+                  ? "New to Warmline?"
+                  : "Already have an account?"}
               </span>
               <button
                 type="button"
                 className="font-medium text-primary underline-offset-4 hover:underline"
                 onClick={() => setFlow(flow === "signIn" ? "signUp" : "signIn")}
               >
-                {flow === "signIn" ? "Sign up" : "Sign in"}
+                {flow === "signIn" ? "Create an account" : "Sign in"}
               </button>
             </div>
 
@@ -144,20 +177,20 @@ export default function SignIn() {
               </div>
             )}
           </form>
-        </CardContent>
-      </Card>
+        </div>
 
-      <p className="text-center text-xs text-muted-foreground">
-        <Link href="/privacy" className="underline-offset-4 hover:underline">
-          Privacy
-        </Link>
-        <span className="mx-2" aria-hidden>
-          ·
-        </span>
-        <Link href="/terms" className="underline-offset-4 hover:underline">
-          Terms
-        </Link>
-      </p>
+        <p className="mt-5 text-center text-xs text-muted-foreground">
+          <Link href="/privacy" className="underline-offset-4 hover:underline">
+            Privacy
+          </Link>
+          <span className="mx-2" aria-hidden>
+            ·
+          </span>
+          <Link href="/terms" className="underline-offset-4 hover:underline">
+            Terms
+          </Link>
+        </p>
+      </div>
     </div>
   );
 }
