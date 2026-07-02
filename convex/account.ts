@@ -52,7 +52,10 @@ async function purgePass(
   const spent = () => deleted >= PASS_BUDGET;
 
   // Persons carry the transitively scoped rows: personVectors and feedback
-  // have no userId and are reached ONLY through the owned person.
+  // have no userId and are reached ONLY through the owned person. A parent is
+  // deleted only after its children are drained TO EXHAUSTION — if the budget
+  // runs out mid-drain, the parent stays and the continuation re-finds it
+  // (deleting it early would strand the tail with no index left to reach it).
   while (!spent()) {
     const persons = await ctx.db
       .query("persons")
@@ -60,6 +63,7 @@ async function purgePass(
       .take(50);
     if (persons.length === 0) break;
     for (const p of persons) {
+      if (spent()) return false;
       const vectors = await ctx.db
         .query("personVectors")
         .withIndex("by_person", (q) => q.eq("personId", p._id))
@@ -68,13 +72,17 @@ async function purgePass(
         await ctx.db.delete(pv._id);
         deleted++;
       }
-      const votes = await ctx.db
-        .query("feedback")
-        .withIndex("by_person", (q) => q.eq("personId", p._id))
-        .take(50);
-      for (const f of votes) {
-        await ctx.db.delete(f._id);
-        deleted++;
+      for (;;) {
+        const votes = await ctx.db
+          .query("feedback")
+          .withIndex("by_person", (q) => q.eq("personId", p._id))
+          .take(100);
+        if (votes.length === 0) break;
+        for (const f of votes) {
+          await ctx.db.delete(f._id);
+          deleted++;
+        }
+        if (spent()) return false; // person survives for the continuation
       }
       // The person's cached avatar photo lives in _storage with no column
       // referencing it; recover it from the serving URL before the row goes.
@@ -101,7 +109,8 @@ async function purgePass(
   }
 
   // Feedback can also be reached through the owned icp (belt and braces for
-  // rows whose person is already gone), then the icp rows themselves.
+  // rows whose person is already gone), then the icp rows themselves — same
+  // drain-children-first rule as persons.
   while (!spent()) {
     const icps = await ctx.db
       .query("icp")
@@ -109,13 +118,18 @@ async function purgePass(
       .take(20);
     if (icps.length === 0) break;
     for (const icp of icps) {
-      const votes = await ctx.db
-        .query("feedback")
-        .withIndex("by_icp", (q) => q.eq("icpId", icp._id))
-        .take(100);
-      for (const f of votes) {
-        await ctx.db.delete(f._id);
-        deleted++;
+      if (spent()) return false;
+      for (;;) {
+        const votes = await ctx.db
+          .query("feedback")
+          .withIndex("by_icp", (q) => q.eq("icpId", icp._id))
+          .take(100);
+        if (votes.length === 0) break;
+        for (const f of votes) {
+          await ctx.db.delete(f._id);
+          deleted++;
+        }
+        if (spent()) return false; // icp survives for the continuation
       }
       await ctx.db.delete(icp._id);
       deleted++;
@@ -166,39 +180,64 @@ async function purgePass(
     }
   }
 
-  if (spent()) return false; // a continuation pass finishes the rest
-
-  // Auth rows, children before parents: refresh tokens hang off sessions,
-  // verification codes off accounts. (authVerifiers are transient OAuth
-  // handshake rows with no user/session index and nothing for a password
-  // deployment; authRateLimits are expiring throttle counters, not personal
-  // rows — neither holds account data.)
-  const sessions = await ctx.db
-    .query("authSessions")
-    .withIndex("userId", (q) => q.eq("userId", userId))
-    .collect();
-  for (const s of sessions) {
-    const tokens = await ctx.db
-      .query("authRefreshTokens")
-      .withIndex("sessionId", (q) => q.eq("sessionId", s._id))
-      .collect();
-    for (const rt of tokens) await ctx.db.delete(rt._id);
-    await ctx.db.delete(s._id);
+  // Auth rows, children before parents, INSIDE the same budget: a long-lived
+  // session accrues a refresh-token row per JWT refresh, so these page like
+  // every other table and a spent budget hands the tail to the continuation.
+  // (authVerifiers are transient OAuth handshake rows with no user/session
+  // index and nothing for a password deployment; authRateLimits are expiring
+  // throttle counters, not personal rows — neither holds account data.)
+  while (!spent()) {
+    const sessions = await ctx.db
+      .query("authSessions")
+      .withIndex("userId", (q) => q.eq("userId", userId))
+      .take(25);
+    if (sessions.length === 0) break;
+    for (const s of sessions) {
+      if (spent()) return false;
+      for (;;) {
+        const tokens = await ctx.db
+          .query("authRefreshTokens")
+          .withIndex("sessionId", (q) => q.eq("sessionId", s._id))
+          .take(100);
+        if (tokens.length === 0) break;
+        for (const rt of tokens) {
+          await ctx.db.delete(rt._id);
+          deleted++;
+        }
+        if (spent()) return false; // session survives for the continuation
+      }
+      await ctx.db.delete(s._id);
+      deleted++;
+    }
   }
-  const accounts = await ctx.db
-    .query("authAccounts")
-    .withIndex("userIdAndProvider", (q) => q.eq("userId", userId))
-    .collect();
-  for (const a of accounts) {
-    const codes = await ctx.db
-      .query("authVerificationCodes")
-      .withIndex("accountId", (q) => q.eq("accountId", a._id))
-      .collect();
-    for (const c of codes) await ctx.db.delete(c._id);
-    await ctx.db.delete(a._id);
+  while (!spent()) {
+    const accounts = await ctx.db
+      .query("authAccounts")
+      .withIndex("userIdAndProvider", (q) => q.eq("userId", userId))
+      .take(25);
+    if (accounts.length === 0) break;
+    for (const a of accounts) {
+      if (spent()) return false;
+      for (;;) {
+        const codes = await ctx.db
+          .query("authVerificationCodes")
+          .withIndex("accountId", (q) => q.eq("accountId", a._id))
+          .take(100);
+        if (codes.length === 0) break;
+        for (const c of codes) {
+          await ctx.db.delete(c._id);
+          deleted++;
+        }
+        if (spent()) return false; // account survives for the continuation
+      }
+      await ctx.db.delete(a._id);
+      deleted++;
+    }
   }
 
-  // The users row goes last, once nothing else references it.
+  // Nothing may have exited on budget above — otherwise the continuation
+  // owns the rest. Only then does the users row go, last of all.
+  if (spent()) return false;
   const user = await ctx.db.get(userId);
   if (user) await ctx.db.delete(userId);
   return true;

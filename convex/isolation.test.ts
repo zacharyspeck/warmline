@@ -834,6 +834,67 @@ test("delete-my-data: A's purge removes every A row and none of B's; anonymous, 
   ).toBe(true);
 });
 
+test("delete-my-data: an account too big for one pass is finished by the scheduled continuation, feedback tails included", async () => {
+  const t = convexTest(schema, modules);
+  // A deliberately oversized account: one person holding far more feedback
+  // rows than a single pass budget or any single page, plus a session with a
+  // stack of refresh tokens — the exact shapes that used to strand tails.
+  const { userId } = await t.run(async (ctx) => {
+    const userId = await ctx.db.insert("users", { email: "big@example.com" });
+    const icpId = await ctx.db.insert("icp", {
+      userId,
+      text: "everything",
+      source: {},
+    });
+    const personId = await ctx.db.insert("persons", {
+      userId,
+      name: "Heavily Voted",
+      isSelf: false,
+      role: "lead" as const,
+      relationshipToYou: "not_connected" as const,
+    });
+    for (let i = 0; i < 620; i++) {
+      await ctx.db.insert("feedback", { icpId, personId, vote: "up" });
+    }
+    const sessionId = await ctx.db.insert("authSessions", {
+      userId,
+      expirationTime: Date.now() + 86_400_000,
+    });
+    for (let i = 0; i < 5; i++) {
+      await ctx.db.insert("authRefreshTokens", {
+        sessionId,
+        expirationTime: Date.now() + 86_400_000,
+      });
+    }
+    return { userId };
+  });
+  const as = t.withIdentity({ subject: `${userId}|s1` });
+
+  vi.useFakeTimers();
+  try {
+    const res = await as.mutation(api.account.deleteMyData, {
+      confirm: "delete my data",
+    });
+    // One pass cannot cover 620 feedback rows: the tail is handed off.
+    expect(res.done).toBe(false);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+  } finally {
+    vi.useRealTimers();
+  }
+
+  // The continuation chain drained EVERYTHING: no dangling feedback (the
+  // person outlived every pass until its children were exhausted), no auth
+  // rows, no user.
+  await t.run(async (ctx) => {
+    expect(await ctx.db.query("feedback").collect()).toEqual([]);
+    expect(await ctx.db.query("persons").collect()).toEqual([]);
+    expect(await ctx.db.query("icp").collect()).toEqual([]);
+    expect(await ctx.db.query("authRefreshTokens").collect()).toEqual([]);
+    expect(await ctx.db.query("authSessions").collect()).toEqual([]);
+    expect(await ctx.db.get(userId)).toBeNull();
+  });
+});
+
 test("no anonymous write path to demo data exists", async () => {
   const t = convexTest(schema, modules);
   await t.mutation(internal.devSeed.seedNetwork, {});
