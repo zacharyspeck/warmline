@@ -163,27 +163,36 @@ export const adminToday = internalQuery({
 });
 
 // The daily cycle's ONE summary line, visible in the Convex dashboard logs —
-// a runaway shows up the same day as used/cap ratios. Scheduled in crons.ts
-// an hour after the refresh fan-out, when the per-user refreshes have run.
+// a runaway shows up as a used/cap ratio no later than the next cycle.
+// Scheduled in crons.ts an hour after the refresh fan-out, when the per-user
+// refreshes have run. The line carries BOTH today's so-far totals and
+// YESTERDAY's finals: spend that lands after today's line prints (the
+// 14:00-UTC-to-midnight window) still surfaces as yesterday's final in
+// tomorrow's line, so no window of the day goes unreported.
 export const logDailySummary = internalMutation({
   args: {},
   returns: v.null(),
   handler: async (ctx) => {
-    const day = dayKey(Date.now());
-    const globalRow = await ctx.db
-      .query("usageGlobal")
-      .withIndex("by_day", (q) => q.eq("day", day))
-      .unique();
-    const rows = await ctx.db
-      .query("usage")
-      .withIndex("by_day", (q) => q.eq("day", day))
-      .take(500);
-    const parts = CATEGORIES.map((c: Category) => {
-      const used = globalRow?.[c] ?? 0;
-      return `${c}=${used}/${globalDailyCap(c)}`;
-    });
+    const now = Date.now();
+    const summarize = async (day: string) => {
+      const globalRow = await ctx.db
+        .query("usageGlobal")
+        .withIndex("by_day", (q) => q.eq("day", day))
+        .unique();
+      const rows = await ctx.db
+        .query("usage")
+        .withIndex("by_day", (q) => q.eq("day", day))
+        .take(500);
+      const parts = CATEGORIES.map((c: Category) => {
+        const used = globalRow?.[c] ?? 0;
+        return `${c}=${used}/${globalDailyCap(c)}`;
+      });
+      return `${parts.join(" ")} · ${rows.length} active user${rows.length === 1 ? "" : "s"}`;
+    };
+    const today = dayKey(now);
+    const yesterday = dayKey(now - 24 * 60 * 60 * 1000);
     console.log(
-      `[usage] ${day} global ${parts.join(" ")} · ${rows.length} active user${rows.length === 1 ? "" : "s"}`,
+      `[usage] ${today} so far ${await summarize(today)} · final ${yesterday} ${await summarize(yesterday)}`,
     );
     return null;
   },
