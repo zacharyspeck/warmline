@@ -52,8 +52,8 @@ export default function ConnectorsPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Connectors</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
-            Make your network searchable to you, your friends, and groups
-            you&apos;re in.
+            Make your network searchable. Only you can search it: every
+            account sees its own imported people and nothing else
           </p>
         </div>
         <HowItWorks />
@@ -72,7 +72,7 @@ export default function ConnectorsPage() {
       <p className="mt-8 text-xs text-muted-foreground">
         {rows === undefined
           ? "Loading your connections…"
-          : `${connectedCount} of ${CONNECTORS.length} sources connected.`}
+          : `${connectedCount} of ${CONNECTORS.length} sources connected`}
       </p>
     </main>
   );
@@ -92,7 +92,7 @@ function ConnectorRow({ def, rows }: { def: ConnectorDef; rows: Row[] }) {
   const hasTabs = Boolean(def.auto && def.manual);
 
   const status = connected
-    ? `Your ${def.name} is connected.`
+    ? `Your ${def.name} is connected`
     : def.blurb;
 
   return (
@@ -133,8 +133,7 @@ function ConnectorRow({ def, rows }: { def: ConnectorDef; rows: Row[] }) {
           </DialogTitle>
           {def.auto ? (
             <DialogDescription>
-              Make your mutual {def.name} followers searchable, excluding
-              anonymous accounts and bots.
+              Make your mutual {def.name} followers searchable
             </DialogDescription>
           ) : null}
         </DialogHeader>
@@ -447,7 +446,7 @@ function Dropzone({
         {busy ? "Uploading…" : `Drop your ${name} export here or click to browse`}
       </span>
       <span className="text-xs text-muted-foreground">
-        You&apos;ll choose what data to share in the next step
+        Your export is imported as soon as the upload finishes
       </span>
       <input
         id={inputId}

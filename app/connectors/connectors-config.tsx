@@ -79,7 +79,7 @@ export const CONNECTORS: ConnectorDef[] = [
     blurb: "Add your Google contacts and calendar",
     oauth: {
       privacy:
-        "Make your network searchable by adding your calendar and contacts. You choose what to share, and the requested permissions cover contacts and calendar only",
+        "Make your network searchable by adding your calendar and contacts. You choose what to share; the requested permissions are contacts, calendar, and your account's basic identity",
       buttonLabel: "Connect Google",
     },
   },
@@ -170,7 +170,7 @@ export const CONNECTORS: ConnectorDef[] = [
     blurb: "Add your Outlook contacts",
     oauth: {
       privacy:
-        "Connect your Outlook account to import your contacts. The requested permission covers contacts only",
+        "Connect your Outlook account to import your contacts. The requested permissions are contacts and your account's basic identity",
       buttonLabel: "Connect Outlook",
     },
   },
@@ -178,7 +178,7 @@ export const CONNECTORS: ConnectorDef[] = [
     provider: "extension",
     name: "Chrome Extension",
     Icon: ChromeIcon,
-    blurb: "Capture your LinkedIn mutual connections.",
+    blurb: "Capture your LinkedIn mutual connections",
     extension: {
       downloadUrl: "https://github.com/warmline/extension/releases/latest",
       intro:
@@ -208,7 +208,7 @@ export const HOW_IT_WORKS: { Icon: IconType; title: string; body: string }[] = [
   {
     Icon: ClockIcon,
     title: "Processing takes a bit",
-    body: "After connecting, it can take up to a couple hours to enrich and index your connections. The feed fills in as processing finishes",
+    body: "Your feed refreshes on the daily run, so newly connected sources can take up to a day to show up in it",
   },
   {
     Icon: ShieldIcon,
