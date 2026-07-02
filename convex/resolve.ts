@@ -128,6 +128,38 @@ async function mergeImpl(
   if (drop.isSelf) patch.isSelf = true;
   if (Object.keys(patch).length) await ctx.db.patch(keepId, patch);
 
+  // The drop person's transitively scoped rows have no userId of their own
+  // and become permanently unreachable danglers if the person dies first
+  // (delete-my-data reaches them only through a live person). Its embedding
+  // moves to the kept record when that one lacks a vector, else it goes; its
+  // feedback re-points like every other reference.
+  const keepVector = await ctx.db
+    .query("personVectors")
+    .withIndex("by_person", (q) => q.eq("personId", keepId))
+    .first();
+  const dropVectors = await ctx.db
+    .query("personVectors")
+    .withIndex("by_person", (q) => q.eq("personId", dropId))
+    .collect();
+  let hasVector = keepVector !== null;
+  for (const pv of dropVectors) {
+    if (!hasVector) {
+      await ctx.db.patch(pv._id, { personId: keepId });
+      hasVector = true;
+    } else {
+      await ctx.db.delete(pv._id);
+    }
+  }
+  for (;;) {
+    const votes = await ctx.db
+      .query("feedback")
+      .withIndex("by_person", (q) => q.eq("personId", dropId))
+      .take(200);
+    if (!votes.length) break;
+    for (const f of votes) await ctx.db.patch(f._id, { personId: keepId });
+    if (votes.length < 200) break;
+  }
+
   await ctx.db.delete(dropId);
   return { edges, attendance, recommendations };
 }

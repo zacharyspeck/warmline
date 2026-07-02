@@ -70,7 +70,18 @@ test("mergePersons: moves edge/recommendation/attendance, fills fields, deletes 
       eventId,
       confidence: 0.8,
     });
-    return { keepId, dropId, edgeId, recId, attId };
+    // Transitively scoped rows on drop: its cached embedding and a vote.
+    // Neither carries a userId, so leaving them behind would strand them.
+    const vecId = await ctx.db.insert("personVectors", {
+      personId: dropId,
+      embedding: new Array(1536).fill(0),
+    });
+    const voteId = await ctx.db.insert("feedback", {
+      icpId,
+      personId: dropId,
+      vote: "up",
+    });
+    return { keepId, dropId, edgeId, recId, attId, vecId, voteId };
   });
 
   const res = await t.mutation(internal.resolve.mergePersons, {
@@ -93,6 +104,12 @@ test("mergePersons: moves edge/recommendation/attendance, fills fields, deletes 
     const keep = await ctx.db.get(seed.keepId);
     expect(keep?.company).toBe("Mintlify");
     expect(keep?.role).toBe("lead");
+    // drop's embedding moved onto keep (keep had none) and its vote
+    // re-pointed: no dangling personVectors or feedback survive the merge.
+    const vec = await ctx.db.get(seed.vecId);
+    const vote = await ctx.db.get(seed.voteId);
+    expect(vec?.personId).toBe(seed.keepId);
+    expect(vote?.personId).toBe(seed.keepId);
   });
 });
 

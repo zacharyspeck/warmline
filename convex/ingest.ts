@@ -250,7 +250,6 @@ export const clearBatch = mutation({
       "attendance",
       "edges",
       "events",
-      "persons",
     ] as const;
     for (const table of tables) {
       const rows = await ctx.db
@@ -261,6 +260,38 @@ export const clearBatch = mutation({
         await ctx.db.delete(r._id);
         deleted++;
       }
+    }
+    // Persons carry the rows that have no userId of their own: each person's
+    // cached vector and any feedback pointing at it are drained BEFORE the
+    // person goes, so a cleared batch never strands rows that delete-my-data
+    // could no longer reach.
+    const persons = await ctx.db
+      .query("persons")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .take(100);
+    for (const p of persons) {
+      const vectors = await ctx.db
+        .query("personVectors")
+        .withIndex("by_person", (q) => q.eq("personId", p._id))
+        .collect();
+      for (const pv of vectors) {
+        await ctx.db.delete(pv._id);
+        deleted++;
+      }
+      for (;;) {
+        const votes = await ctx.db
+          .query("feedback")
+          .withIndex("by_person", (q) => q.eq("personId", p._id))
+          .take(100);
+        if (!votes.length) break;
+        for (const f of votes) {
+          await ctx.db.delete(f._id);
+          deleted++;
+        }
+        if (votes.length < 100) break;
+      }
+      await ctx.db.delete(p._id);
+      deleted++;
     }
     return { deleted };
   },

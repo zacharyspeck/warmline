@@ -329,7 +329,7 @@ test("ingestLeads: dedups attendance within a single call (duplicate rows)", asy
 
 // ── clearBatch ──
 
-test("clearBatch: wipes only the caller's rows", async () => {
+test("clearBatch: wipes only the caller's rows, danglers included", async () => {
   const t = convexTest(schema, modules);
   const a = await newUser(t, "a@example.com");
   const b = await newUser(t, "b@example.com");
@@ -338,6 +338,28 @@ test("clearBatch: wipes only the caller's rows", async () => {
   });
   await b.as.mutation(api.ingest.ingestLeads, {
     rows: [{ name: "B Lead", linkedinUrl: "b-lead", eventName: "B Event" }],
+  });
+  // A's lead carries the transitively scoped rows (no userId of their own):
+  // a cached embedding and a vote. clearBatch must take them with the person
+  // or they dangle forever.
+  await t.run(async (ctx) => {
+    const aLead = (await ctx.db.query("persons").collect()).find(
+      (p) => p.name === "A Lead",
+    )!;
+    const icpId = await ctx.db.insert("icp", {
+      userId: aLead.userId,
+      text: "goal",
+      source: {},
+    });
+    await ctx.db.insert("personVectors", {
+      personId: aLead._id,
+      embedding: new Array(1536).fill(0),
+    });
+    await ctx.db.insert("feedback", {
+      icpId,
+      personId: aLead._id,
+      vote: "up",
+    });
   });
 
   // A resets; loop until 0 like the loader does.
@@ -352,4 +374,11 @@ test("clearBatch: wipes only the caller's rows", async () => {
   expect(people.map((p) => p.name)).toEqual(["B Lead"]);
   expect(events.map((e) => e.name)).toEqual(["B Event"]);
   expect(att).toHaveLength(1);
+  // No dangling transitively scoped rows survived A's reset.
+  const vectors = await t.run(async (ctx) =>
+    ctx.db.query("personVectors").collect(),
+  );
+  const votes = await t.run(async (ctx) => ctx.db.query("feedback").collect());
+  expect(vectors).toEqual([]);
+  expect(votes).toEqual([]);
 });
