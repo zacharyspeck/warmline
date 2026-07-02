@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useAction, useMutation } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,10 @@ type ConnectedMap = Partial<Record<Provider, boolean>>;
 
 export default function Onboarding() {
   const router = useRouter();
+  // Non-null when the user has already onboarded: re-running the wizard
+  // builds a NEW goal and feed on completion, so returning visitors get an
+  // exit and a plain warning instead of a silent reset.
+  const existingIcp = useQuery(api.icp.latest, {});
   const generate = useAction(api.onboard.generate);
   const generateUploadUrl = useMutation(api.connectors.generateUploadUrl);
   const recordUpload = useMutation(api.connectors.recordUpload);
@@ -159,9 +164,23 @@ export default function Onboarding() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-12">
       <div className={phase === "connect" ? "w-full max-w-2xl" : "w-full max-w-md"}>
-        <div className="mb-8">
+        <div className="mb-8 flex items-center justify-between gap-4">
           <WarmlineLockup markClassName="size-7" />
+          {existingIcp && phase !== "processing" && (
+            <Link
+              href="/"
+              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Back to your feed
+            </Link>
+          )}
         </div>
+        {existingIcp && phase !== "processing" && (
+          <p className="mb-6 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+            You already have a goal and feed. Finishing this flow replaces
+            them with a fresh goal and re-ranks from scratch
+          </p>
+        )}
 
         {phase === "audience" && (
           <AudienceStep
@@ -378,7 +397,7 @@ function ConnectStep({
         <OAuthCard
           Icon={GoogleIcon}
           name="Google"
-          blurb="Contacts, calendar, and email headers."
+          blurb="Contacts and calendar"
           connected={!!connected.google}
           startUrl="/api/connectors/google"
         />
@@ -386,7 +405,7 @@ function ConnectStep({
         <OAuthCard
           Icon={OutlookIcon}
           name="Outlook"
-          blurb="Contacts from recent email activity."
+          blurb="Import your Outlook contacts"
           connected={!!connected.outlook}
           startUrl="/api/connectors/outlook"
         />
@@ -394,14 +413,14 @@ function ConnectStep({
         <FileCard
           Icon={LinkedinIcon}
           name="LinkedIn"
-          blurb="Import your connections export."
+          blurb="Import your connections export"
           connected={!!connected.linkedin}
           busy={!!uploadBusy.linkedin}
           accept=".zip,application/zip"
           acceptLabel="ZIP file"
           exportUrl="https://www.linkedin.com/mypreferences/d/download-my-data"
           guide={[
-            { text: "Select Download larger data archive (top option).", warn: "Second option won't include connections." },
+            { text: "Select Download larger data archive (top option)", warn: "Second option won't include connections" },
             { text: "Click Request archive; LinkedIn emails it in about 10 min" },
           ]}
           onFile={(f) => onFileUpload("linkedin", f, true)}
@@ -410,28 +429,28 @@ function ConnectStep({
         <FileCard
           Icon={XIcon}
           name="Twitter / X"
-          blurb="Import your followers archive."
+          blurb="Import your followers archive"
           connected={!!connected.twitter}
           busy={!!uploadBusy.twitter}
           accept=".zip,application/zip"
           acceptLabel="ZIP file"
           exportUrl="https://x.com/settings/download_your_data"
-          guide={[{ text: "Request your archive on the next screen." }]}
+          guide={[{ text: "Request your archive on the next screen" }]}
           onFile={(f) => onFileUpload("twitter", f)}
         />
 
         <FileCard
           Icon={LumaIcon}
           name="Luma"
-          blurb="Add guests from events you host."
+          blurb="Add guests from events you host"
           connected={!!connected.luma}
           busy={!!uploadBusy.luma}
           accept=".csv,text/csv"
           acceptLabel="CSV file"
           exportUrl="https://lu.ma/home"
           guide={[
-            { text: "Open an event you host → Guests tab." },
-            { text: "Click Export and download as CSV." },
+            { text: "Open an event you host → Guests tab" },
+            { text: "Click Export and download as CSV" },
           ]}
           onFile={(f) => onFileUpload("luma", f)}
         />
@@ -439,13 +458,13 @@ function ConnectStep({
         <FileCard
           Icon={InstagramIcon}
           name="Instagram"
-          blurb="Add your mutual followers."
+          blurb="Add your mutual followers"
           connected={!!connected.instagram}
           busy={!!uploadBusy.instagram}
           accept=".zip,.json,.html,application/zip,application/json,text/html"
           acceptLabel="ZIP, JSON, or HTML"
           exportUrl="https://accountscenter.instagram.com/info_and_permissions/dyi/"
-          guide={[{ text: "Request a download → Connections → JSON or HTML." }]}
+          guide={[{ text: "Request a download → Connections → JSON or HTML" }]}
           onFile={(f) => onFileUpload("instagram", f)}
         />
       </div>
@@ -592,15 +611,15 @@ function FileCard({
 
 function ExtensionCard({ connected, onMark }: { connected: boolean; onMark: () => void }) {
   return (
-    <SourceCard Icon={ChromeIcon} name="Chrome Extension" blurb="Capture LinkedIn mutual connections as you browse." connected={connected}>
+    <SourceCard Icon={ChromeIcon} name="Chrome Extension" blurb="Capture LinkedIn mutual connections as you browse" connected={connected}>
       {!connected && (
         <div className="flex flex-col gap-3">
           <ol className="grid grid-cols-2 gap-x-6 gap-y-1.5">
             {[
-              "Download the Warmline extension and unzip it.",
-              "Open chrome://extensions, enable Developer mode.",
-              "Click Load unpacked and select the folder.",
-              "Open a lead's LinkedIn profile to capture mutuals.",
+              "Download the Warmline extension and unzip it",
+              "Open chrome://extensions, enable Developer mode",
+              "Click Load unpacked and select the folder",
+              "Open a lead's LinkedIn profile to capture mutuals",
             ].map((text, i) => (
               <li key={i} className="flex gap-2 text-xs text-secondary-foreground">
                 <span className="flex size-4 shrink-0 items-center justify-center rounded bg-primary/15 text-[10px] font-semibold text-primary">{i + 1}</span>
