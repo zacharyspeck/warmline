@@ -38,7 +38,7 @@ import {
   XIcon,
 } from "@/components/icons/brand";
 import { cn } from "@/lib/utils";
-import { WarmlineLockup } from "@/components/warmline-mark";
+import { WarmlineMark } from "@/components/warmline-mark";
 import type { Provider } from "@/app/connectors/connectors-config";
 
 const PROCESSING_STEPS = [
@@ -164,19 +164,38 @@ export default function Onboarding() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-12">
       <div className={phase === "connect" ? "w-full max-w-2xl" : "w-full max-w-md"}>
-        <div className="mb-8 flex items-center justify-between gap-4">
-          <WarmlineLockup markClassName="size-7" />
-          {existingIcp && phase !== "processing" && (
+        {existingIcp && phase !== "processing" && (
+          <div className="mb-4 flex justify-end">
             <Link
               href="/"
               className="text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               Back to your feed
             </Link>
+          </div>
+        )}
+        {/* S2 header: the small amber W with step dashes beneath it. */}
+        <div className="mb-8 flex flex-col items-center gap-3">
+          <WarmlineMark className="size-6 text-primary" />
+          {phase !== "processing" && (
+            <div className="flex items-center gap-1.5" aria-hidden>
+              {(["audience", "product", "connect"] as const).map((p, i) => (
+                <span
+                  key={p}
+                  className={cn(
+                    "h-[3px] w-7 rounded-full transition-colors",
+                    (phase === "audience" ? 0 : phase === "product" ? 1 : 2) >=
+                      i
+                      ? "bg-primary"
+                      : "bg-border",
+                  )}
+                />
+              ))}
+            </div>
           )}
         </div>
         {existingIcp && phase !== "processing" && (
-          <p className="mb-6 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+          <p className="mb-6 rounded-lg border border-border bg-card px-3 py-2 text-center text-xs text-muted-foreground">
             You already have a goal and feed. Finishing this flow replaces
             them with a fresh goal and re-ranks from scratch
           </p>
@@ -261,20 +280,24 @@ function AudienceStep({
   }[] = [
     {
       id: "individual",
-      title: "Just me",
-      blurb: "Grow my own network and reach people who can help my goal",
+      title: "Individual",
+      blurb: "Founder, investor, or operator building your own network",
     },
     {
       id: "company",
-      title: "A company or growth team",
-      blurb: "Find and warm up the people we want to sell to",
+      title: "Company or growth team",
+      blurb: "Reach customers, partners, or hires on behalf of your company",
     },
   ];
   return (
-    <div>
-      <h1 className="text-xl font-semibold tracking-tight">Who is this for?</h1>
-      <p className="mt-1.5 text-sm text-muted-foreground">
-        This shapes how we read your goal and who we surface
+    <div className="rounded-2xl border border-border bg-card px-7 py-9 [box-shadow:var(--shadow-s)]">
+      <h1 className="text-center font-display text-2xl font-semibold tracking-tight text-foreground">
+        Who are you setting
+        <br />
+        up Warmline for?
+      </h1>
+      <p className="mt-2 text-center text-sm text-muted-foreground">
+        This tunes how we rank people for you
       </p>
       <div className="mt-7 flex flex-col gap-2.5">
         {options.map((o) => {
@@ -286,25 +309,35 @@ function AudienceStep({
               onClick={() => onChange(o.id)}
               aria-pressed={selected}
               className={cn(
-                "rounded-xl border bg-card p-4 text-left [box-shadow:var(--shadow-s)] transition-colors",
+                "flex items-start justify-between gap-3 rounded-xl border bg-background/40 p-4 text-left transition-colors",
                 selected
                   ? "border-primary ring-1 ring-primary"
                   : "border-border hover:border-ring/40",
               )}
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium text-foreground">
+              <span>
+                <span className="block text-sm font-medium text-foreground">
                   {o.title}
                 </span>
-                {selected && (
-                  <CheckIcon className="size-4 text-primary" aria-hidden />
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  {o.blurb}
+                </span>
+              </span>
+              <span
+                aria-hidden
+                className={cn(
+                  "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
+                  selected ? "border-primary" : "border-muted-foreground/40",
                 )}
-              </div>
-              <p className="mt-0.5 text-xs text-muted-foreground">{o.blurb}</p>
+              >
+                {selected && (
+                  <span className="size-2 rounded-full bg-primary" />
+                )}
+              </span>
             </button>
           );
         })}
-        <Button onClick={onNext} className="mt-1">
+        <Button onClick={onNext} variant="primary" className="mt-2 h-11 w-full">
           Continue
         </Button>
       </div>
@@ -323,11 +356,11 @@ function ProductStep({
 }) {
   const individual = audience === "individual";
   return (
-    <div>
-      <h1 className="text-xl font-semibold tracking-tight">
-        {individual ? "What are you working on?" : "What do you sell?"}
+    <div className="rounded-2xl border border-border bg-card px-7 py-9 [box-shadow:var(--shadow-s)]">
+      <h1 className="text-center font-display text-2xl font-semibold tracking-tight text-foreground">
+        {individual ? "What are you working toward?" : "What do you sell?"}
       </h1>
-      <p className="mt-1.5 text-sm text-muted-foreground">
+      <p className="mx-auto mt-2 max-w-sm text-center text-sm text-muted-foreground">
         {individual
           ? "We read what you're building to learn who you should meet, then rank the people you know by who can help"
           : "We read your product to learn who you're selling to, then rank the people you know against it"}
@@ -343,9 +376,17 @@ function ProductStep({
         />
         <Field label="Your LinkedIn" value={linkedin} onChange={onLinkedin} placeholder="https://linkedin.com/in/you" type="url" />
         <Field label="Your X" value={x} onChange={onX} placeholder="https://x.com/you" type="url" />
-        <Button onClick={onNext} disabled={!website.trim()} className="mt-1">
+        <Button
+          onClick={onNext}
+          disabled={!website.trim()}
+          variant="primary"
+          className="mt-2 h-11 w-full"
+        >
           Continue
         </Button>
+        <p className="text-center text-xs text-muted-foreground">
+          You can refine this any time
+        </p>
       </div>
     </div>
   );
