@@ -2,8 +2,9 @@
 // Phase E hard gate: cost caps. Budgets are reserved before any OpenAI call,
 // caps degrade instead of throwing, absent config fails closed to zero, and
 // the daily cron completes its cycle no matter how many users are capped.
-// No real OpenAI calls anywhere: tests either prove zero calls happen (no
-// API key is set, so a single call would throw) or stub fetch and count.
+// No real OpenAI calls anywhere: every test either stubs the key empty with
+// a throw-and-count fetch (proving zero calls regardless of the runner's
+// env) or stubs fetch with a fake response and counts the calls.
 import { convexTest, type TestConvex } from "convex-test";
 import { expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
@@ -200,9 +201,24 @@ test("a fully capped user's rebuild completes: degraded copy, kept cache, zero O
     });
   });
 
-  // No OPENAI_API_KEY is set: a single judge or embed call would throw, so a
-  // completed rebuild PROVES zero OpenAI calls were made.
-  const res = await t.action(internal.rank.rebuild, { icpId: A.icpId });
+  // The zero-calls proof is ENFORCED, not inherited from the host shell: the
+  // key is stubbed empty (apiKey() throws on any attempt) and every fetch
+  // throws loudly and is counted — a rebuild that reaches the network cannot
+  // pass this test, whatever env the runner has exported.
+  let networkCalls = 0;
+  vi.stubEnv("OPENAI_API_KEY", "");
+  vi.stubGlobal("fetch", async () => {
+    networkCalls++;
+    throw new Error("unexpected network call in a fully capped rebuild");
+  });
+  let res;
+  try {
+    res = await t.action(internal.rank.rebuild, { icpId: A.icpId });
+  } finally {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  }
+  expect(networkCalls).toBe(0);
   expect(res.judged).toBe(0);
   expect(res.judgeDegraded).toBe(JUDGE_TOP_N);
   expect(res.embedsSkipped).toBe(1); // the stripped lead kept a neutral fit
