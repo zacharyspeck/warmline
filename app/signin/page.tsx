@@ -2,6 +2,7 @@
 
 import { useAuthActions } from "@convex-dev/auth/react";
 import { ConvexError } from "convex/values";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -140,6 +141,18 @@ export default function SignIn() {
           </form>
         </CardContent>
       </Card>
+
+      <p className="text-center text-xs text-muted-foreground">
+        <Link href="/privacy" className="underline-offset-4 hover:underline">
+          Privacy
+        </Link>
+        <span className="mx-2" aria-hidden>
+          ·
+        </span>
+        <Link href="/terms" className="underline-offset-4 hover:underline">
+          Terms
+        </Link>
+      </p>
     </div>
   );
 }

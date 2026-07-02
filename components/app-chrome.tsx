@@ -22,7 +22,13 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
   const me = useQuery(api.auth.currentUser);
   const { signOut } = useAuthActions();
 
-  if (pathname === "/onboarding" || pathname === "/signin") return <>{children}</>;
+  if (
+    pathname === "/onboarding" ||
+    pathname === "/signin" ||
+    pathname === "/privacy" ||
+    pathname === "/terms"
+  )
+    return <>{children}</>;
 
   return (
     <div className="flex h-screen overflow-hidden">
