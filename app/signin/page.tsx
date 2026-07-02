@@ -118,6 +118,11 @@ export default function SignIn() {
               {loading ? "Loading…" : flow === "signIn" ? "Sign in" : "Sign up"}
             </Button>
 
+            {/* OAuth sign-in ("Continue with Google") returns HERE in the
+                OAuth phase, as a divider + provider button above this footer.
+                Email and password is the ONLY login flow until then; the
+                Google/Outlook OAuth under app/api/connectors is data-source
+                permission, not login, and stays. */}
             <div className="flex flex-row justify-center gap-2 text-sm">
               <span className="text-muted-foreground">
                 {flow === "signIn" ? "Don't have an account?" : "Already have an account?"}
