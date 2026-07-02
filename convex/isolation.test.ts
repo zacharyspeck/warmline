@@ -590,6 +590,212 @@ test("signup gate: a direct backend call with a bad, missing, or absent-config i
   }
 });
 
+// Everything one user owns, counted through the same paths the purge uses.
+async function ownedCounts(t: Tester, userId: Id<"users">) {
+  return await t.run(async (ctx) => {
+    const persons = await ctx.db
+      .query("persons")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    let vectors = 0;
+    let votes = 0;
+    for (const p of persons) {
+      vectors += (
+        await ctx.db
+          .query("personVectors")
+          .withIndex("by_person", (q) => q.eq("personId", p._id))
+          .collect()
+      ).length;
+      votes += (
+        await ctx.db
+          .query("feedback")
+          .withIndex("by_person", (q) => q.eq("personId", p._id))
+          .collect()
+      ).length;
+    }
+    return {
+      persons: persons.length,
+      vectors,
+      votes,
+      edges: (
+        await ctx.db
+          .query("edges")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect()
+      ).length,
+      events: (
+        await ctx.db
+          .query("events")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect()
+      ).length,
+      attendance: (
+        await ctx.db
+          .query("attendance")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect()
+      ).length,
+      recommendations: (
+        await ctx.db
+          .query("recommendations")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect()
+      ).length,
+      icp: (
+        await ctx.db
+          .query("icp")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect()
+      ).length,
+      connectors: (
+        await ctx.db
+          .query("connectors")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .collect()
+      ).length,
+      usage: (
+        await ctx.db
+          .query("usage")
+          .withIndex("by_user_and_day", (q) => q.eq("userId", userId))
+          .collect()
+      ).length,
+      sessions: (
+        await ctx.db
+          .query("authSessions")
+          .withIndex("userId", (q) => q.eq("userId", userId))
+          .collect()
+      ).length,
+      accounts: (
+        await ctx.db
+          .query("authAccounts")
+          .withIndex("userIdAndProvider", (q) => q.eq("userId", userId))
+          .collect()
+      ).length,
+      userRow: (await ctx.db.get(userId)) ? 1 : 0,
+    };
+  });
+}
+
+test("delete-my-data: A's purge removes every A row and none of B's; anonymous, demo, and wrong-phrase callers are denied", async () => {
+  const t = convexTest(schema, modules);
+  const A = await buildWorld(t, "alice@example.com", 0);
+  const B = await buildWorld(t, "bob@example.com", 500);
+
+  // Flesh both accounts out to every table the purge covers: edges, a rec,
+  // a vote, a usage row, and realistic auth rows.
+  await t.action(internal.edges.computeEdges, { userId: A.userId });
+  await t.action(internal.edges.computeEdges, { userId: B.userId });
+  await writeTopRecommendation(t, A.icpId, A.leadIds[0], 90);
+  await writeTopRecommendation(t, B.icpId, B.leadIds[0], 88);
+  await A.as.mutation(api.feedback.vote, {
+    icpId: A.icpId,
+    personId: A.leadIds[0],
+    vote: "up",
+  });
+  await B.as.mutation(api.feedback.vote, {
+    icpId: B.icpId,
+    personId: B.leadIds[0],
+    vote: "up",
+  });
+  await t.mutation(internal.usage.reserve, {
+    userId: A.userId,
+    category: "judge",
+    count: 3,
+  });
+  await t.mutation(internal.usage.reserve, {
+    userId: B.userId,
+    category: "judge",
+    count: 3,
+  });
+  await t.run(async (ctx) => {
+    for (const uid of [A.userId, B.userId]) {
+      const sessionId = await ctx.db.insert("authSessions", {
+        userId: uid,
+        expirationTime: Date.now() + 86_400_000,
+      });
+      await ctx.db.insert("authRefreshTokens", {
+        sessionId,
+        expirationTime: Date.now() + 86_400_000,
+      });
+      const accountId = await ctx.db.insert("authAccounts", {
+        userId: uid,
+        provider: "password",
+        providerAccountId: `${uid}@example.com`,
+        secret: "hashed",
+      });
+      await ctx.db.insert("authVerificationCodes", {
+        accountId,
+        provider: "password",
+        code: `code-${uid}`,
+        expirationTime: Date.now() + 86_400_000,
+      });
+    }
+  });
+
+  // Denied: anonymous, wrong phrase, and the demo account with the RIGHT
+  // phrase (its graph is the public demo).
+  await expect(
+    t.mutation(api.account.deleteMyData, { confirm: "delete my data" }),
+  ).rejects.toThrow(/Not authenticated/);
+  await expect(
+    A.as.mutation(api.account.deleteMyData, { confirm: "delete" }),
+  ).rejects.toThrow(/Confirmation phrase/);
+  await t.mutation(internal.devSeed.seedNetwork, {});
+  const demoId = await t.run(async (ctx) => {
+    const demo = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", DEMO_EMAIL))
+      .unique();
+    return demo!._id;
+  });
+  await expect(
+    t
+      .withIdentity({ subject: `${demoId}|s1` })
+      .mutation(api.account.deleteMyData, { confirm: "delete my data" }),
+  ).rejects.toThrow(/cannot be deleted/);
+
+  // Snapshot, then A deletes with the exact phrase.
+  const beforeA = await ownedCounts(t, A.userId);
+  const beforeB = await ownedCounts(t, B.userId);
+  for (const key of [
+    "persons",
+    "vectors",
+    "votes",
+    "edges",
+    "recommendations",
+    "icp",
+    "usage",
+    "sessions",
+    "accounts",
+    "userRow",
+  ] as const) {
+    expect(beforeA[key]).toBeGreaterThan(0);
+  }
+  const res = await A.as.mutation(api.account.deleteMyData, {
+    confirm: "delete my data",
+  });
+  expect(res.done).toBe(true);
+
+  // Every A row is gone — domain, transitively scoped, usage, and auth —
+  // and B's world is byte-identical.
+  const afterA = await ownedCounts(t, A.userId);
+  for (const [key, value] of Object.entries(afterA)) {
+    expect(value, `A still owns ${key} rows`).toBe(0);
+  }
+  expect(await ownedCounts(t, B.userId)).toEqual(beforeB);
+  // Orphan check across the un-indexed children: only B's auth children remain.
+  await t.run(async (ctx) => {
+    expect((await ctx.db.query("authRefreshTokens").collect()).length).toBe(1);
+    expect(
+      (await ctx.db.query("authVerificationCodes").collect()).length,
+    ).toBe(1);
+  });
+  // The demo account survived the whole test.
+  expect(
+    await t.run(async (ctx) => (await ctx.db.get(demoId)) !== null),
+  ).toBe(true);
+});
+
 test("no anonymous write path to demo data exists", async () => {
   const t = convexTest(schema, modules);
   await t.mutation(internal.devSeed.seedNetwork, {});
