@@ -26,7 +26,7 @@ export const getOrCreateDemoUser = internalMutation({
   },
 });
 
-// Read-only demo-account lookup (the GET extension route must not create users).
+// Read-only demo-account lookup for internal and admin callers.
 export const demoUserId = internalQuery({
   args: {},
   returns: v.union(v.id("users"), v.null()),

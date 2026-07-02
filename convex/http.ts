@@ -15,10 +15,11 @@ const cors = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
-// Whose graph the extension writes into: the signed-in user when the request
-// carries a valid Convex Auth JWT; otherwise null (callers fall back to the
-// demo account). The shared-token Bearer header is not a JWT, so it resolves
-// to null here without throwing.
+// Whose graph the extension touches: ONLY the signed-in user whose valid
+// Convex Auth JWT is on the request; anything else resolves null and the
+// routes return 401. The old WARMLINE_EXTENSION_TOKEN demo fallback is gone
+// by owner decision: the demo account's content changes only through the
+// daily cron and the internal admin loaders, never through these routes.
 async function authedUser(ctx: {
   auth: { getUserIdentity: () => Promise<unknown> };
 }): Promise<Id<"users"> | null> {
@@ -47,21 +48,8 @@ http.route({
     if (!body.leadSlug) {
       return new Response("leadSlug required", { status: 400, headers: cors });
     }
-    // Shared-secret gate, FAIL-CLOSED: writing into the demo account requires
-    // WARMLINE_EXTENSION_TOKEN to be set on the deploy AND a matching
-    // Authorization: Bearer header. Unset → anonymous callers are rejected;
-    // the demo graph is publicly readable (demo.ts), so no anonymous path may
-    // write into it.
-    const token = process.env.WARMLINE_EXTENSION_TOKEN;
-    const authz = req.headers.get("Authorization");
-    const tokenOk = !!token && authz === `Bearer ${token}`;
-    // A signed-in user's JWT scopes the write to their own graph; the shared
-    // token scopes it to the demo account.
-    const userId =
-      (await authedUser(ctx)) ??
-      (tokenOk
-        ? await ctx.runMutation(internal.devSeed.getOrCreateDemoUser, {})
-        : null);
+    // Extension writes require a signed-in user and land in THEIR graph.
+    const userId = await authedUser(ctx);
     if (!userId) {
       return new Response("unauthorized", { status: 401, headers: cors });
     }
@@ -85,17 +73,10 @@ http.route({
 http.route({
   path: "/extension/leads",
   method: "GET",
-  handler: httpAction(async (ctx, req) => {
-    // Same fail-closed gate as POST /extension/mutuals above.
-    const token = process.env.WARMLINE_EXTENSION_TOKEN;
-    const authz = req.headers.get("Authorization");
-    const tokenOk = !!token && authz === `Bearer ${token}`;
-    const userId =
-      (await authedUser(ctx)) ??
-      (tokenOk ? await ctx.runQuery(internal.devSeed.demoUserId, {}) : null);
+  handler: httpAction(async (ctx) => {
+    // Same rule as POST /extension/mutuals: a signed-in user's own graph only.
+    const userId = await authedUser(ctx);
     if (!userId) {
-      // Token-authorized but no demo account yet → nothing to crawl.
-      if (tokenOk) return Response.json({ leads: [] }, { headers: cors });
       return new Response("unauthorized", { status: 401, headers: cors });
     }
     const leads = await ctx.runQuery(internal.extension.pendingLeads, {
