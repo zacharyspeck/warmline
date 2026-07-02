@@ -45,3 +45,6 @@ warmline-*.png
 .firecrawl/
 scratch-*.md
 /tmp/warmline-next.log
+
+# The committed design references are the exception to the export ignore above
+!design/screens/warmline-*.png
