@@ -56,8 +56,9 @@ export default function Privacy() {
           yourself from your own accounts
         </li>
         <li>
-          Scrape your accounts or read your messages. Warmline sees only the
-          files and connections you choose to import
+          Scrape your accounts or read your messages. Warmline sees only what
+          you choose to import or connect, and its connector permissions
+          request contacts and calendar access only, never mail
         </li>
         <li>Sell your data or share it with advertisers</li>
         <li>
@@ -70,9 +71,9 @@ export default function Privacy() {
         The public demo
       </h2>
       <p className="mt-3 text-sm text-foreground/80">
-        The feed shown to signed-out visitors on the landing page runs on
-        synthetic people created for the demo. It is nobody&apos;s real
-        network.
+        The feed shown to signed-out visitors on the landing page belongs to a
+        demo account we curate, seeded with synthetic people. It is not any
+        user&apos;s network, and no user&apos;s data can appear in it.
       </p>
 
       <h2 className="mt-8 text-lg font-semibold tracking-tight">

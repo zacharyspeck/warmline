@@ -26,7 +26,7 @@ I came up with the original concept, built the demo/seed dataset, and wrote the 
 Everything below is enforced server-side and pinned by the test suite (`convex/isolation.test.ts` and `convex/limits.test.ts`).
 
 - **Gated signup**: creating an account requires an invite code, checked inside the server signup flow. The code lives on the Convex deployment as `INVITE_CODE`; while it is unset every signup is rejected
-- **Logged-out demo**: signed-out visitors on the landing page see a read-only feed and graph owned by a demo account of synthetic people. The demo queries take no user id of any kind and the server resolves the demo account internally
+- **Logged-out demo**: signed-out visitors on the landing page see a read-only feed and graph owned by a curated demo account seeded with synthetic people. The demo queries take no user id of any kind and the server resolves the demo account internally
 - **Per-user isolation**: every domain table is keyed by `userId` and every query and mutation is scoped to the signed-in caller. One account can never read or write another's rows, including by crafted id lookups
 - **Cost caps**: every OpenAI call is budget-reserved before it happens, with per-tier daily caps, a flat per-user scrape cap, and global daily caps across all users, all defined in one file (`convex/limits.ts`). Cap hits degrade to cached data and heuristic copy instead of failing
 - **Delete my data**: Settings has a typed-confirmation control that permanently removes everything an account owns, auth rows included. Plain-English `/privacy` and `/terms` pages describe exactly what is stored

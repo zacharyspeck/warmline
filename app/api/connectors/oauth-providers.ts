@@ -1,6 +1,7 @@
 // OAuth config for data-source connectors (Google contacts/calendar, Outlook
-// mail metadata). These are SEPARATE from app login — they capture permission
-// to read a network, not to sign in.
+// contacts). These are SEPARATE from app login — they capture permission to
+// read a network, not to sign in. Scopes stay least-privilege: /privacy
+// promises Warmline never reads messages, so no mail scope is requested.
 //
 // SCAFFOLD: the flow is fully coded but untested — it needs a real OAuth app.
 // Create one in your own console (you must do this; secrets can't be handled
@@ -48,7 +49,7 @@ export const OAUTH_PROVIDERS: Record<OauthProviderId, OauthProviderConfig> = {
     emailField: (j) =>
       (typeof j.mail === "string" && j.mail) ||
       (typeof j.userPrincipalName === "string" ? j.userPrincipalName : undefined),
-    scopes: ["openid", "email", "offline_access", "Contacts.Read", "Mail.Read"],
+    scopes: ["openid", "email", "offline_access", "Contacts.Read"],
     clientIdEnv: "MICROSOFT_OAUTH_CLIENT_ID",
     clientSecretEnv: "MICROSOFT_OAUTH_CLIENT_SECRET",
   },
