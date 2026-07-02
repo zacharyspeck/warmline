@@ -58,6 +58,7 @@ export default function DemoFeed() {
           rows={rows}
           voteFor={NO_VOTES}
           onVote={() => setSignupOpen(true)}
+          voteMotion={false}
           renderGraph={(personId) => <DemoGraphAccordion personId={personId} />}
         />
       )}

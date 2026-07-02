@@ -42,35 +42,69 @@ function xHref(handle?: string) {
   return handle ? `https://x.com/${handle.replace(/^@/, "")}` : undefined;
 }
 
+// S4 motion spec, "one vote, one turn of the wheel":
+//   1. Pivot off the top — the voted card rotates back over the top edge and
+//      fades: translateY(-52px) rotateX(-78°), opacity 1 → 0, 500ms,
+//      cubic-bezier(.34,.03,.22,1), perspective 1150px, origin top.
+//   2. Feed eases up — every card below slides up one slot on the same curve.
+//   3. Next rolls in — the voted card re-enters at the bottom of the list.
+// The vote itself commits when the pivot completes (the caller then demotes
+// the row, which reorders `rows`). prefers-reduced-motion skips the theater
+// and votes instantly.
+const WHEEL_EASE: [number, number, number, number] = [0.34, 0.03, 0.22, 1];
+const WHEEL_MS = 0.5;
+
 export function FeedList({
   rows,
   voteFor,
   onVote,
   renderGraph,
+  voteMotion = true,
 }: {
   rows: FeedRow[];
   voteFor: ReadonlyMap<Id<"persons">, "up" | "down">;
   onVote: (personId: Id<"persons">, vote: "up" | "down") => void;
   renderGraph: (personId: Id<"persons">) => React.ReactNode;
+  // The demo feed passes false: its thumbs open a sign-up prompt and nothing
+  // cycles, so the card must not pivot away.
+  voteMotion?: boolean;
 }) {
   const [expanded, setExpanded] = useState<Id<"persons"> | null>(null);
+  const [pending, setPending] = useState<{
+    id: Id<"persons">;
+    vote: "up" | "down";
+  } | null>(null);
+  const reduceMotion = useReducedMotion();
+
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3" style={{ perspective: 1150 }}>
         {rows.map((row) => (
           <FeedCard
             key={row.id}
             row={row}
             currentVote={voteFor.get(row.id)}
             expanded={expanded === row.id}
+            exiting={pending?.id === row.id}
             onToggle={() =>
               setExpanded((cur) => (cur === row.id ? null : row.id))
             }
             onVote={(v) => {
+              if (pending) return; // one turn of the wheel at a time
               // A vote closes the card's panel: the card is about to cycle
               // away, and its open panel must not be left behind.
               setExpanded((cur) => (cur === row.id ? null : cur));
-              onVote(row.id, v);
+              if (!voteMotion || reduceMotion) {
+                onVote(row.id, v);
+                return;
+              }
+              setPending({ id: row.id, vote: v });
+            }}
+            onExitComplete={() => {
+              if (pending) {
+                onVote(pending.id, pending.vote);
+                setPending(null);
+              }
             }}
             renderGraph={renderGraph}
           />
@@ -108,15 +142,19 @@ function FeedCard({
   row,
   currentVote,
   expanded,
+  exiting,
   onToggle,
   onVote,
+  onExitComplete,
   renderGraph,
 }: {
   row: FeedRow;
   currentVote?: "up" | "down";
   expanded: boolean;
+  exiting: boolean;
   onToggle: () => void;
   onVote: (v: "up" | "down") => void;
+  onExitComplete: () => void;
   renderGraph: (personId: Id<"persons">) => React.ReactNode;
 }) {
   const reduceMotion = useReducedMotion();
@@ -124,11 +162,20 @@ function FeedCard({
   return (
     <motion.article
       layout="position"
+      animate={
+        exiting
+          ? { y: -52, rotateX: -78, opacity: 0 }
+          : { y: 0, rotateX: 0, opacity: 1 }
+      }
       transition={
         reduceMotion
           ? { duration: 0 }
-          : { type: "spring", duration: 0.35, bounce: 0.15 }
+          : { duration: WHEEL_MS, ease: WHEEL_EASE }
       }
+      style={{ transformOrigin: "top", transformPerspective: 1150 }}
+      onAnimationComplete={() => {
+        if (exiting) onExitComplete();
+      }}
       onClick={onToggle}
       className={cn(
         "cursor-pointer rounded-xl border bg-card p-5 [box-shadow:var(--shadow-s)] transition-colors",
