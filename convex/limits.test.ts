@@ -176,18 +176,19 @@ test("a fully capped user's rebuild completes: degraded copy, kept cache, zero O
   const A = await seedWorld(t, "alice@example.com", 0);
 
   // One lead loses its cached vector so the embed path is exercised too.
-  const strippedLead = await t.run(async (ctx) => {
+  const { strippedLeadId, leadCount } = await t.run(async (ctx) => {
     const persons = await ctx.db
       .query("persons")
       .withIndex("by_user", (q) => q.eq("userId", A.userId))
       .collect();
-    const lead = persons.find((p) => p.role === "lead")!;
+    const leads = persons.filter((p) => p.role === "lead");
+    const lead = leads[0];
     const pv = await ctx.db
       .query("personVectors")
       .withIndex("by_person", (q) => q.eq("personId", lead._id))
       .unique();
     await ctx.db.delete(pv!._id);
-    return lead._id;
+    return { strippedLeadId: lead._id, leadCount: leads.length };
   });
 
   // Exhaust A's ENTIRE daily judge + embed budget up front.
@@ -222,7 +223,9 @@ test("a fully capped user's rebuild completes: degraded copy, kept cache, zero O
   expect(res.judged).toBe(0);
   expect(res.judgeDegraded).toBe(JUDGE_TOP_N);
   expect(res.embedsSkipped).toBe(1); // the stripped lead kept a neutral fit
-  expect(res.scored).toBeGreaterThan(JUDGE_TOP_N);
+  // EVERY seeded lead was scored — the vectorless one was degraded to a
+  // neutral goal-fit, not ejected from the pipeline.
+  expect(res.scored).toBe(leadCount);
 
   // Every top row was still written — heuristic copy, marked for re-judge.
   const recs = await recsFor(t, A.icpId);
@@ -233,8 +236,15 @@ test("a fully capped user's rebuild completes: degraded copy, kept cache, zero O
     expect(r.how.length).toBeGreaterThan(0);
     expect(r.opener).toBe("");
   }
-  // The vectorless lead is still scored into the world, not dropped.
-  expect(strippedLead).toBeTruthy();
+  // The capped embed truly never ran: the stripped lead STILL has no cached
+  // vector after the rebuild.
+  const pvAfter = await t.run(async (ctx) =>
+    ctx.db
+      .query("personVectors")
+      .withIndex("by_person", (q) => q.eq("personId", strippedLeadId))
+      .unique(),
+  );
+  expect(pvAfter).toBeNull();
 
   // The feed renders the degraded rows like any others.
   const feed = await A.as.query(api.feed.list, { limit: 50 });
