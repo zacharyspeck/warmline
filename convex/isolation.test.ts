@@ -729,6 +729,22 @@ test("delete-my-data: A's purge removes every A row and none of B's; anonymous, 
         code: `code-${uid}`,
         expirationTime: Date.now() + 86_400_000,
       });
+      // seedNetwork creates no events or attendance: seed one of each so the
+      // all-zero-after assertions can't pass vacuously for those tables.
+      const eventId = await ctx.db.insert("events", {
+        userId: uid,
+        name: "Demo Day",
+      });
+      const persons = await ctx.db
+        .query("persons")
+        .withIndex("by_user", (q) => q.eq("userId", uid))
+        .take(1);
+      await ctx.db.insert("attendance", {
+        userId: uid,
+        personId: persons[0]._id,
+        eventId,
+        confidence: 0.9,
+      });
     }
   });
 
@@ -792,6 +808,8 @@ test("delete-my-data: A's purge removes every A row and none of B's; anonymous, 
     "vectors",
     "votes",
     "edges",
+    "events",
+    "attendance",
     "recommendations",
     "icp",
     "connectors",
@@ -827,6 +845,23 @@ test("delete-my-data: A's purge removes every A row and none of B's; anonymous, 
     expect(await ctx.db.system.get(blobs[A.userId].avatar)).toBeNull();
     expect(await ctx.db.system.get(blobs[B.userId].upload)).not.toBeNull();
     expect(await ctx.db.system.get(blobs[B.userId].avatar)).not.toBeNull();
+  });
+  // GLOBAL orphan sweep for the tables with no userId: ownedCounts can only
+  // see vectors/votes through a live person, so a purge that deleted persons
+  // first would zero those counts while stranding every row. Scan the whole
+  // tables: each surviving row must belong to one of B's persons, and the
+  // totals must equal B's snapshot exactly.
+  await t.run(async (ctx) => {
+    const allVectors = await ctx.db.query("personVectors").collect();
+    for (const pv of allVectors) {
+      expect(B.personIds.has(pv.personId)).toBe(true);
+    }
+    expect(allVectors.length).toBe(beforeB.vectors);
+    const allVotes = await ctx.db.query("feedback").collect();
+    for (const f of allVotes) {
+      expect(B.personIds.has(f.personId)).toBe(true);
+    }
+    expect(allVotes.length).toBe(beforeB.votes);
   });
   // The demo account survived the whole test.
   expect(
