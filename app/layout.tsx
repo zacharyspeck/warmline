@@ -22,6 +22,11 @@ const schibsted = Schibsted_Grotesk({
 });
 
 export const metadata: Metadata = {
+  // Absolute URLs for OG/twitter cards resolve against the real domain once
+  // NEXT_PUBLIC_SITE_URL is set (post domain purchase; see MANUAL_TODO.md).
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
+  ),
   title: "Warmline",
   description:
     "The For You feed for your warm network. Who to reach out to, why, and how",

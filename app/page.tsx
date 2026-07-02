@@ -1,8 +1,15 @@
+import type { Metadata } from "next";
 import { isAuthenticatedNextjs } from "@convex-dev/auth/nextjs/server";
 import Link from "next/link";
 import HomeFeed from "@/components/home-feed";
 import DemoFeed from "@/components/demo-feed";
 import { Button } from "@/components/ui/button";
+
+export const metadata: Metadata = {
+  title: "Warmline · The For You feed for your warm network",
+  description:
+    "Warmline ranks who to reach out to, why they fit your goal, and the warmest path to an intro. Invite-only beta with a live demo feed.",
+};
 
 // The landing route. The server branches on the auth cookie:
 //   • signed in  → your feed (components/home-feed.tsx, api.feed.list)
