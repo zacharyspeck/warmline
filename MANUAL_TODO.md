@@ -1,19 +1,23 @@
 # Manual TODO
 
-Everything that needs the owner, from the autonomous run on 1 July 2026.
-Companion handoff: `artifacts/2026-07-01-session-handoff.md` (local only).
+Everything that needs the owner, across the autonomous runs on 1-2 July 2026.
+Companion handoffs in `artifacts/` (local only): `2026-07-01-session-handoff.md`
+and `2026-07-02-session-handoff.md`.
 
 ## Review and merge
 
 - **Review and merge `zach/phase2-accounts` first** (Phases D, E, F: demo,
   invite gate, cost caps, delete-my-data, privacy/terms, plus two adversarial
   review passes with all confirmed findings fixed, plus the extension
-  lockdown `8afc379`). 22 commits ahead of the old branch point, suite at
-  69/69, build green
-- **Then review `zach/design-skin`** (branched from phase2-accounts: nav,
-  vote-wheel motion, copy sweep, one review pass with 13 findings fixed).
-  9 commits, suite 69/69, build green. Merging design-skin brings
+  lockdown `8afc379`). Suite 69/69, build green
+- **Then review `zach/design-skin`** (branched from phase2-accounts, then
+  merged it back in): the six-screen skin rebuild to the committed design
+  references, the SEO baseline, and the /pricing surface, with two review
+  passes fixed. Suite 70/70, build green. Merging design-skin brings
   phase2-accounts with it
+- **Review the provisional pricing numbers before merge** (Free / Pro $20 a
+  month / Team). They are placeholders labeled provisional on the page, set by
+  reasoning not owner decision; confirm or change them
 
 ## Browser verification checklist
 
@@ -34,17 +38,33 @@ On `zach/phase2-accounts` (run `npm run dev`, seed the demo with
 5. Convex dashboard → run `usage:adminToday`, confirm per-user counts; check
    the 14:00 UTC `[usage]` log line the next day
 
-On `zach/design-skin`, additionally:
+On `zach/design-skin`, additionally (the rebuilt screens and pricing):
 
-6. Sidebar shows Feed / Connectors / Onboarding / Settings signed in
-7. Vote a thumbs on a feed row: the row animates to the bottom in ~350ms,
-   thumb stays selected; with OS reduced-motion on, it moves instantly
-8. Expand a row's graph, vote a DIFFERENT row: the open panel moves with its
-   parent row, no detach
-9. Onboarding from the nav with an existing account: "Back to your feed" link
-   and the replace-warning banner appear
-10. `/connectors`: header copy says only you can search; Google/Outlook
-    dialogs promise no email reading
+6. Sign-in and create-account (S1): centered dark card, W lockup, one amber
+   button, invite-code field on Create account, no Google button, no Forgot
+   link, footer Privacy/Terms links resolve
+7. Onboarding (S2): amber W with step dashes, the two audience radio cards
+   with the amber selected ring, "Back to your feed" + replace warning when an
+   account already has a goal
+8. Feed (S3): the card list with photo, why lines, the warm-intro pill, the
+   mutual stack, and the amber Relevance number; the sidebar shows Who to
+   reach out to / Connectors / Goals with a Settings gear in the footer
+9. Vote-wheel (S4): thumbs a card and it cycles toward the bottom on a
+   sub-400ms spring, thumb stays selected, amber left edge appears; with OS
+   reduced-motion on it snaps. Vote, then immediately click a sidebar item or
+   reload within the animation: the vote must still persist (the regression
+   the review caught)
+10. Connectors (S5): LinkedIn is the hero drag-and-drop, drop a real export and
+    watch it import; the other sources are one-line rows with Connect dialogs;
+    Google/Outlook dialogs promise no mail access
+11. Person view (S6): expand a card for the three-node warm path (You, bridge,
+    amber target), why-fits bullets, and the Copy-opener card
+12. Pricing (`/pricing`): three plans, provisional; signed in, Request access
+    on Pro or Team writes a row (verify with `npx convex run
+    upgrade:adminListRequests`); signed out, the CTA routes to sign in
+13. SEO: `/robots.txt` and `/sitemap.xml` serve; view-source on `/` shows the
+    marketing headline in the initial HTML; `/opengraph-image` renders the
+    brand card
 
 ## Money and keys
 
@@ -69,14 +89,32 @@ On `zach/design-skin`, additionally:
 - Buy the domain; set up Vercel (this repo builds clean with
   `npm run build`) and a production Convex deployment; set OPENAI_API_KEY,
   INVITE_CODE, and the OAuth client env vars there
+- **Set NEXT_PUBLIC_SITE_URL after the domain purchase** (placeholder in
+  .env.example). sitemap.xml, robots.txt, and the Open Graph URLs read it;
+  until it is set they fall back to `http://localhost:3000`, which is fine for
+  dev but wrong for a deployed sitemap submitted to search engines
 - The Convex Auth prod setup needs JWT keys on the prod deployment
   (`npx @convex-dev/auth` or the dashboard init)
 
+## Future supervised sessions
+
+- **Stripe / payment wiring.** The /pricing page's Request access funnel
+  writes an upgradeRequests row and nothing more; there is no payment code
+  anywhere by design. Wiring real checkout is its own supervised session and
+  needs the owner's Stripe account and keys (publishable + secret + webhook
+  signing secret), which cannot be provisioned autonomously. The
+  upgradeRequests table and `upgrade:adminListRequests` are the handoff point
+
 ## Product decisions and content
 
-- **Commit the design reference PNGs** (task 5 found none anywhere in the
-  repo, so the Happenstance-caliber screen rebuild never ran). Put them under
-  `design/` and re-run the skin task
+- ~~Commit the design reference PNGs~~ **RESOLVED 2 July 2026**: the owner
+  supplied the zip, the six PNGs (S1-S6) are committed under
+  `design/screens/`, and all six screens were rebuilt to match them
+- **Forgot-password link (deferred decision).** The S1 reference shows a
+  "Forgot?" link, deliberately omitted because no password-reset flow exists.
+  Convex Auth's Password provider supports a reset flow (email + code), but it
+  needs an email sender configured. Decide whether to build reset before
+  launch; until then, a locked-out beta user is reset by hand
 - ~~Decide: token-gated extension writes into the demo account~~ **RESOLVED
   1 July 2026**: the token path is removed entirely in `8afc379` on
   zach/phase2-accounts. Extension writes require a signed-in user and land in
@@ -92,5 +130,7 @@ On `zach/design-skin`, additionally:
   whether you eventually want goal EDITING instead of replacement
 - `scripts/loadDemo.mjs` is still untracked (it now shells out to
   `npx convex run seedDemo:loadDemo` since the loader went internal). Commit
-  it if you want it in history; `RUN_PLAN.md` at the root can be deleted once
-  this run is reviewed
+  it if you want it in history; `RUN_PLAN.md` and `RUN_PLAN_2.md` at the root,
+  and the two `# Warmline Logo Design.zip` archives, can be deleted once these
+  runs are reviewed (the design PNGs are already committed under
+  `design/screens/`)
