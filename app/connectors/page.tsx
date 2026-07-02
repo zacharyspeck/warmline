@@ -50,17 +50,25 @@ export default function ConnectorsPage() {
 
       <header className="mb-8 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Connectors</h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            Make your network searchable. Only you can search it: every
-            account sees its own imported people and nothing else
+          <h1 className="font-display text-[28px] font-semibold tracking-tight text-foreground">
+            Connectors
+          </h1>
+          <p className="mt-1.5 max-w-lg text-sm text-muted-foreground">
+            Warmline reads your warm network from these sources. The more you
+            connect, the sharper the intros. Only you can search what you add
           </p>
         </div>
         <HowItWorks />
       </header>
 
-      <section className="flex flex-col gap-2.5">
-        {CONNECTORS.map((def) => (
+      {/* S5: LinkedIn is the hero — a working drag-and-drop right on the page. */}
+      <LinkedInHero
+        def={CONNECTORS.find((d) => d.provider === "linkedin")!}
+        rows={byProvider.linkedin ?? []}
+      />
+
+      <section className="mt-3 flex flex-col gap-2.5">
+        {CONNECTORS.filter((def) => def.provider !== "linkedin").map((def) => (
           <ConnectorRow
             key={def.provider}
             def={def}
@@ -82,6 +90,95 @@ function groupByProvider(rows: Row[]): Partial<Record<Provider, Row[]>> {
   const out: Partial<Record<Provider, Row[]>> = {};
   for (const row of rows) (out[row.provider] ??= []).push(row);
   return out;
+}
+
+// ── LinkedIn hero: the working drag-and-drop, inline on the page (S5) ───────
+function LinkedInHero({ def, rows }: { def: ConnectorDef; rows: Row[] }) {
+  const { Icon } = def;
+  const generateUploadUrl = useMutation(api.connectors.generateUploadUrl);
+  const recordUpload = useMutation(api.connectors.recordUpload);
+  const parseLinkedIn = useAction(api.linkedinImport.parseLinkedInExport);
+  const [busy, setBusy] = useState(false);
+  const existing = rows.find((r) => r.method === "manual");
+
+  async function onFile(file: File) {
+    try {
+      setBusy(true);
+      const url = await generateUploadUrl();
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      if (!res.ok) throw new Error("Upload failed");
+      const { storageId } = (await res.json()) as {
+        storageId: Row["storageId"];
+      };
+      await recordUpload({
+        provider: "linkedin",
+        method: "manual",
+        label: "LinkedIn data",
+        fileName: file.name,
+        storageId,
+      });
+      if (storageId) {
+        toast.success("Upload received, importing connections…");
+        const { imported, skipped } = await parseLinkedIn({ storageId });
+        toast.success(
+          `Imported ${imported} connections (${skipped} already in graph)`,
+        );
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 [box-shadow:var(--shadow-s)]">
+      <div className="flex items-center gap-4">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg [background-image:var(--velour-raised)] [box-shadow:var(--shadow-button)]">
+          <Icon className="size-5" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">LinkedIn</span>
+            {existing ? (
+              <Badge variant="success" className="gap-1 text-[10px]">
+                <CheckIcon className="size-2.5" aria-hidden />
+                Connected
+              </Badge>
+            ) : null}
+          </div>
+          <p className="truncate text-sm text-muted-foreground">
+            The backbone of your warm graph. Import your connections
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <Dropzone accept=".zip,application/zip" name="LinkedIn" busy={busy} onFile={onFile} />
+        <p className="mt-2 text-center text-xs text-muted-foreground">
+          Accepts the .zip from{" "}
+          <a
+            href="https://www.linkedin.com/mypreferences/d/download-my-data"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-4 hover:text-foreground"
+          >
+            LinkedIn → Settings → Data privacy → Get a copy of your data
+          </a>
+        </p>
+      </div>
+
+      {existing ? (
+        <div className="mt-3">
+          <RecordRow row={existing} />
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 // ── A single connector row + its connect dialog ────────────────────────────
