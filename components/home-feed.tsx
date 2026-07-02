@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { FeedTable } from "@/components/feed-table";
+import { FeedList } from "@/components/feed-list";
 import { WarmGraph } from "@/components/warm-graph";
 
 // The signed-in feed. Rendered by app/page.tsx only for authenticated visitors
@@ -74,15 +75,29 @@ export default function HomeFeed() {
     return [...ranked, ...cycled];
   }, [feed, demoted]);
 
+  // The goal line under the title (S3): the real goal text, trimmed so the
+  // header stays one line, with the amber Edit goal link into the wizard.
+  const goal =
+    icp && icp.text.length > 72 ? `${icp.text.slice(0, 72)}…` : icp?.text;
+
   return (
-    <div className="w-full px-4 py-8">
+    <div className="mx-auto w-full max-w-3xl px-6 py-10">
       <header className="mb-7">
-        <h1 className="text-xl font-semibold tracking-tight">
+        <h1 className="font-display text-[28px] font-semibold tracking-tight text-foreground">
           Who to reach out to
         </h1>
         <p className="mt-1.5 text-sm text-foreground/60">
-          Ranked by how warm the path is and how well they fit your goal,{" "}
-          <span className="text-foreground/80 font-medium">refreshed daily</span>
+          {goal ? (
+            <>Ranked for your goal: {goal} </>
+          ) : (
+            <>Ranked by warm path and goal fit, refreshed daily </>
+          )}
+          <Link
+            href="/onboarding"
+            className="font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Edit goal
+          </Link>
         </p>
       </header>
 
@@ -95,7 +110,7 @@ export default function HomeFeed() {
           No people yet. Connect a source to load your network
         </p>
       ) : (
-        <FeedTable
+        <FeedList
           rows={rows}
           voteFor={voteFor}
           onVote={(personId, v) => {

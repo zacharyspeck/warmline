@@ -21,3 +21,6 @@ export { DownloadIcon } from "./download";
 export { UsersIcon } from "./users";
 export { CalendarIcon } from "./calendar";
 export { InfoIcon } from "./info";
+export { Link2Icon } from "./link-2";
+export { TargetIcon } from "./target";
+export { SettingsIcon } from "./settings";

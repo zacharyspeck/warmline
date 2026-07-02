@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { FeedTable } from "@/components/feed-table";
+import { FeedList } from "@/components/feed-list";
 import { WarmGraph } from "@/components/warm-graph";
 import { Button } from "@/components/ui/button";
 import {
@@ -54,7 +54,7 @@ export default function DemoFeed() {
           The demo network is warming up. Check back soon
         </p>
       ) : (
-        <FeedTable
+        <FeedList
           rows={rows}
           voteFor={NO_VOTES}
           onVote={() => setSignupOpen(true)}
