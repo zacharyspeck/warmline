@@ -76,10 +76,10 @@ export const CONNECTORS: ConnectorDef[] = [
     provider: "google",
     name: "Google",
     Icon: GoogleIcon,
-    blurb: "Add your Google contacts, calendar, and email headers.",
+    blurb: "Add your Google contacts and calendar",
     oauth: {
       privacy:
-        "Make your network searchable by adding your calendar, contacts, or email headers. You choose what to share. For email, we only read headers, never message bodies.",
+        "Make your network searchable by adding your calendar and contacts. You choose what to share, and the requested permissions cover contacts and calendar only",
       buttonLabel: "Connect Google",
     },
   },
@@ -87,17 +87,17 @@ export const CONNECTORS: ConnectorDef[] = [
     provider: "linkedin",
     name: "LinkedIn",
     Icon: LinkedinIcon,
-    blurb: "Add your LinkedIn connections.",
+    blurb: "Add your LinkedIn connections",
     manual: {
       exportUrl: "https://www.linkedin.com/mypreferences/d/download-my-data",
       accept: "ZIP file accepted",
       acceptMime: ".zip,application/zip",
       guide: [
         {
-          text: "Select Download larger data archive (the top option).",
-          warn: "The second option won't work, it doesn't include your connections.",
+          text: "Select Download larger data archive (the top option)",
+          warn: "The second option won't work, it doesn't include your connections",
         },
-        { text: "Click Request archive." },
+        { text: "Click Request archive" },
       ],
     },
   },
@@ -105,12 +105,12 @@ export const CONNECTORS: ConnectorDef[] = [
     provider: "instagram",
     name: "Instagram",
     Icon: InstagramIcon,
-    blurb: "Add your mutual Instagram followers.",
+    blurb: "Add your mutual Instagram followers",
     beta: true,
     auto: {
       partner: "Fabric",
       partnerNote:
-        "Fabric partners with Meta to transfer your Instagram connections safely and easily.",
+        "Fabric partners with Meta to transfer your Instagram connections safely and easily",
       scopes: [
         {
           key: "connections",
@@ -131,8 +131,8 @@ export const CONNECTORS: ConnectorDef[] = [
       accept: "ZIP, JSON, or HTML accepted",
       acceptMime: ".zip,.json,.html,application/zip,application/json,text/html",
       guide: [
-        { text: "Request a download of your information from Instagram." },
-        { text: "Choose Connections, then download it as JSON or HTML." },
+        { text: "Request a download of your information from Instagram" },
+        { text: "Choose Connections, then download it as JSON or HTML" },
       ],
     },
   },
@@ -140,26 +140,26 @@ export const CONNECTORS: ConnectorDef[] = [
     provider: "twitter",
     name: "Twitter",
     Icon: XIcon,
-    blurb: "Add your Twitter followers.",
+    blurb: "Add your Twitter followers",
     manual: {
       exportUrl: "https://x.com/settings/download_your_data",
       accept: "ZIP file accepted",
       acceptMime: ".zip,application/zip",
-      guide: [{ text: "Request your archive on the next screen." }],
+      guide: [{ text: "Request your archive on the next screen" }],
     },
   },
   {
     provider: "luma",
     name: "Luma",
     Icon: LumaIcon,
-    blurb: "Add your Luma events and guests.",
+    blurb: "Add your Luma events and guests",
     manual: {
       exportUrl: "https://lu.ma/home",
       accept: "CSV file accepted",
       acceptMime: ".csv,text/csv",
       guide: [
-        { text: "Open an event you host and go to the Guests tab." },
-        { text: "Click Export and download the guest list as CSV." },
+        { text: "Open an event you host and go to the Guests tab" },
+        { text: "Click Export and download the guest list as CSV" },
       ],
     },
   },
@@ -167,10 +167,10 @@ export const CONNECTORS: ConnectorDef[] = [
     provider: "outlook",
     name: "Outlook",
     Icon: OutlookIcon,
-    blurb: "Add your Outlook contacts.",
+    blurb: "Add your Outlook contacts",
     oauth: {
       privacy:
-        "Connect your Outlook account so we can find your connections from recent email activity. We only read email headers, never message bodies.",
+        "Connect your Outlook account to import your contacts. The requested permission covers contacts only",
       buttonLabel: "Connect Outlook",
     },
   },
@@ -182,15 +182,15 @@ export const CONNECTORS: ConnectorDef[] = [
     extension: {
       downloadUrl: "https://github.com/warmline/extension/releases/latest",
       intro:
-        "Mutual connections aren't exposed by any API; they're only visible in LinkedIn's logged-in UI. The extension reads them from profiles you open, in your own session",
+        "Mutual connections are visible only in LinkedIn's logged-in UI. The extension reads them from profiles you open, in your own session",
       steps: [
-        { text: "Download the Warmline extension and unzip it." },
+        { text: "Download the Warmline extension and unzip it" },
         {
-          text: "Open chrome://extensions and turn on Developer mode (top right).",
+          text: "Open chrome://extensions and turn on Developer mode (top right)",
         },
-        { text: "Click Load unpacked and select the unzipped folder." },
+        { text: "Click Load unpacked and select the unzipped folder" },
         {
-          text: "Pin Warmline, then open a Lead's LinkedIn profile to capture mutuals.",
+          text: "Pin Warmline, then open a Lead's LinkedIn profile to capture mutuals",
         },
       ],
       buttonLabel: "I've installed it",
@@ -203,21 +203,21 @@ export const HOW_IT_WORKS: { Icon: IconType; title: string; body: string }[] = [
   {
     Icon: UsersIcon,
     title: "We research your connections",
-    body: "We automatically find professional info, social profiles, and other public details about each person you share with us.",
+    body: "We automatically find professional info, social profiles, and other public details about each person you share with us",
   },
   {
     Icon: ClockIcon,
     title: "Processing takes a bit",
-    body: "After connecting, it can take up to a couple hours to enrich and index your connections. We'll email you when it's ready.",
+    body: "After connecting, it can take up to a couple hours to enrich and index your connections. The feed fills in as processing finishes",
   },
   {
     Icon: ShieldIcon,
     title: "Your data stays private",
-    body: "We never share, sell, or use your data to train AI models. Only you, your friends, and groups you join can search your connections.",
+    body: "We never share, sell, or use your data to train AI models. Only you can search your connections",
   },
   {
     Icon: InfoIcon,
     title: "We don't overshare",
-    body: "We never reveal the contents or recency of your communications. You can delete your sensitive connections at any time.",
+    body: "We never reveal the contents or recency of your communications. You can delete your data at any time from Settings",
   },
 ];
