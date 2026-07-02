@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { useRouter } from "next/navigation";
 import { api } from "@/convex/_generated/api";
@@ -44,10 +44,24 @@ export default function HomeFeed() {
     },
   );
 
+  // The vote wheel: a voted row cycles toward the bottom of the list (the
+  // feedback is "heard", the slot opens for the next person) while its vote
+  // state persists on the thumb. Purely visual and local — scores and the
+  // stored order don't change until the daily re-rank.
+  const [demoted, setDemoted] = useState<ReadonlyMap<Id<"persons">, number>>(
+    new Map(),
+  );
+  const demoteSeq = useRef(0);
+
   const rows = useMemo(() => {
-    const data = feed ?? [];
-    return [...data].sort((a, b) => b.score - a.score);
-  }, [feed]);
+    const data = [...(feed ?? [])].sort((a, b) => b.score - a.score);
+    if (demoted.size === 0) return data;
+    const ranked = data.filter((r) => !demoted.has(r.id));
+    const cycled = data
+      .filter((r) => demoted.has(r.id))
+      .sort((a, b) => demoted.get(a.id)! - demoted.get(b.id)!);
+    return [...ranked, ...cycled];
+  }, [feed, demoted]);
 
   return (
     <div className="w-full px-4 py-8">
@@ -76,6 +90,9 @@ export default function HomeFeed() {
           onVote={(personId, v) => {
             if (icp) {
               void vote({ icpId: icp._id, personId, vote: v });
+              setDemoted((prev) =>
+                new Map(prev).set(personId, demoteSeq.current++),
+              );
             }
           }}
           renderGraph={(personId) => <GraphAccordion personId={personId} />}

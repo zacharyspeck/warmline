@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -48,6 +49,13 @@ function linkedinHref(slug?: string) {
 function xHref(handle?: string) {
   return handle ? `https://x.com/${handle.replace(/^@/, "")}` : undefined;
 }
+
+// The vote wheel: rows are motion rows keyed by person id, so when the caller
+// reorders `rows` (a vote cycles a row toward the bottom, home-feed.tsx) each
+// row FLIP-animates from its old slot to its new one. Subtle and quick
+// (spring, ~350ms), and prefers-reduced-motion collapses it to an instant
+// move. Ranking itself is untouched; the real re-rank stays on the daily run.
+const MotionTableRow = motion.create(TableRow);
 
 export function FeedTable({
   rows,
@@ -138,9 +146,19 @@ function FeedRowView({
   onVote: (v: "good" | "bad") => void;
   renderGraph: (personId: Id<"persons">) => React.ReactNode;
 }) {
+  const reduceMotion = useReducedMotion();
   return (
     <>
-      <TableRow className="cursor-pointer" onClick={onToggle}>
+      <MotionTableRow
+        layout="position"
+        transition={
+          reduceMotion
+            ? { duration: 0 }
+            : { type: "spring", duration: 0.35, bounce: 0.15 }
+        }
+        className="cursor-pointer"
+        onClick={onToggle}
+      >
         {/* Person */}
         <TableCell className="align-top">
           <div className="flex items-start gap-3">
@@ -308,7 +326,7 @@ function FeedRowView({
             </Button>
           </div>
         </TableCell>
-      </TableRow>
+      </MotionTableRow>
 
       {expanded && (
         <TableRow>
