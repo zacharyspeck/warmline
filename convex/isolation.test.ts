@@ -732,6 +732,36 @@ test("delete-my-data: A's purge removes every A row and none of B's; anonymous, 
     }
   });
 
+  // Each user also holds the two kinds of _storage blobs the purge must
+  // remove: a raw uploaded export on a connector row, and a cached avatar
+  // photo referenced ONLY by its serving URL on a person row.
+  const blobs = await t.run(async (ctx) => {
+    const out: Record<string, { upload: Id<"_storage">; avatar: Id<"_storage"> }> = {};
+    for (const world of [A, B]) {
+      const upload = await ctx.storage.store(
+        new Blob([`export-of-${world.userId}`]),
+      );
+      await ctx.db.insert("connectors", {
+        userId: world.userId,
+        provider: "linkedin",
+        method: "manual",
+        status: "active",
+        label: "LinkedIn data",
+        fileName: "connections.zip",
+        storageId: upload,
+      });
+      const avatar = await ctx.storage.store(
+        new Blob([`avatar-of-${world.userId}`]),
+      );
+      // Production stores only the serving URL (avatars.ts); mirror its shape.
+      await ctx.db.patch(world.leadIds[0], {
+        avatarUrl: `https://test.convex.cloud/api/storage/${avatar}`,
+      });
+      out[world.userId] = { upload, avatar };
+    }
+    return out;
+  });
+
   // Denied: anonymous, wrong phrase, and the demo account with the RIGHT
   // phrase (its graph is the public demo).
   await expect(
@@ -764,6 +794,7 @@ test("delete-my-data: A's purge removes every A row and none of B's; anonymous, 
     "edges",
     "recommendations",
     "icp",
+    "connectors",
     "usage",
     "sessions",
     "accounts",
@@ -789,6 +820,13 @@ test("delete-my-data: A's purge removes every A row and none of B's; anonymous, 
     expect(
       (await ctx.db.query("authVerificationCodes").collect()).length,
     ).toBe(1);
+  });
+  // A's _storage blobs (uploaded export + cached avatar) are gone; B's remain.
+  await t.run(async (ctx) => {
+    expect(await ctx.db.system.get(blobs[A.userId].upload)).toBeNull();
+    expect(await ctx.db.system.get(blobs[A.userId].avatar)).toBeNull();
+    expect(await ctx.db.system.get(blobs[B.userId].upload)).not.toBeNull();
+    expect(await ctx.db.system.get(blobs[B.userId].avatar)).not.toBeNull();
   });
   // The demo account survived the whole test.
   expect(

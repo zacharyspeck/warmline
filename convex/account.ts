@@ -25,6 +25,23 @@ export const CONFIRM_PHRASE = "delete my data";
 // limits.
 const PASS_BUDGET = 500;
 
+// Delete the _storage blob behind a Convex storage serving URL. The avatar
+// pipeline (avatars.ts storeAvatar) keeps ONLY the serving URL on the person
+// row, and those URLs end in /api/storage/<storageId> — so the blob's id is
+// recovered from the URL. External avatar URLs (seeded demo data, unavatar)
+// don't match the pattern and are skipped.
+async function deleteStorageFromUrl(
+  ctx: MutationCtx,
+  url: string | undefined,
+): Promise<void> {
+  if (!url) return;
+  const match = url.match(/\/api\/storage\/([^/?#]+)/);
+  if (!match) return;
+  const storageId = match[1] as Id<"_storage">;
+  const meta = await ctx.db.system.get(storageId);
+  if (meta) await ctx.storage.delete(storageId);
+}
+
 // One bounded pass of the purge. Returns true when EVERYTHING (including the
 // users row) is gone.
 async function purgePass(
@@ -59,7 +76,26 @@ async function purgePass(
         await ctx.db.delete(f._id);
         deleted++;
       }
+      // The person's cached avatar photo lives in _storage with no column
+      // referencing it; recover it from the serving URL before the row goes.
+      await deleteStorageFromUrl(ctx, p.avatarUrl);
       await ctx.db.delete(p._id);
+      deleted++;
+    }
+  }
+
+  // Connectors carry the user's raw uploaded export file (the most sensitive
+  // artifact the app holds — a LinkedIn ZIP includes every contact's email
+  // address). Delete the blob BEFORE the row, like connectors.disconnect does.
+  while (!spent()) {
+    const rows = await ctx.db
+      .query("connectors")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .take(50);
+    if (rows.length === 0) break;
+    for (const c of rows) {
+      if (c.storageId) await ctx.storage.delete(c.storageId);
+      await ctx.db.delete(c._id);
       deleted++;
     }
   }
@@ -87,9 +123,10 @@ async function purgePass(
   }
 
   // Every remaining user-keyed table, straight off its by_user index (usage
-  // via the by_user_and_day prefix, which sweeps ALL days).
+  // via the by_user_and_day prefix, which sweeps ALL days). Connectors are
+  // handled above because their storage blob must go first.
   type PurgeId = Id<
-    "recommendations" | "attendance" | "edges" | "events" | "connectors" | "usage"
+    "recommendations" | "attendance" | "edges" | "events" | "usage"
   >;
   const pagers: Array<() => Promise<Array<{ _id: PurgeId }>>> = [
     () =>
@@ -110,11 +147,6 @@ async function purgePass(
     () =>
       ctx.db
         .query("events")
-        .withIndex("by_user", (q) => q.eq("userId", userId))
-        .take(100),
-    () =>
-      ctx.db
-        .query("connectors")
         .withIndex("by_user", (q) => q.eq("userId", userId))
         .take(100),
     () =>

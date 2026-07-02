@@ -32,6 +32,14 @@ export default function Privacy() {
           Contacts you import yourself, with the fields in your export: names,
           headlines, companies, LinkedIn and X handles
         </li>
+        <li>
+          The raw export files you upload, exactly as you upload them. A
+          LinkedIn export can include your contacts&apos; email addresses
+        </li>
+        <li>
+          The email address of any account you connect, and cached profile
+          photos for people in your feed
+        </li>
         <li>The goal you type during onboarding and the links you provide</li>
         <li>Your thumbs votes on feed rows, used to tune your own ranking</li>
         <li>
@@ -73,8 +81,8 @@ export default function Privacy() {
       <p className="mt-3 text-sm text-foreground/80">
         Settings has a Delete my data control. It permanently removes your
         imported contacts, connections, events, goal, votes, recommendations,
-        usage counts, and your account itself. There is no undo and nothing is
-        retained.
+        usage counts, uploaded files, cached photos, and your account itself.
+        There is no undo and nothing is retained.
       </p>
 
       <p className="mt-10 text-xs text-foreground/50">
