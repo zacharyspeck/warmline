@@ -7,8 +7,9 @@ Companion handoff: `artifacts/2026-07-01-session-handoff.md` (local only).
 
 - **Review and merge `zach/phase2-accounts` first** (Phases D, E, F: demo,
   invite gate, cost caps, delete-my-data, privacy/terms, plus two adversarial
-  review passes with all confirmed findings fixed). 21 commits ahead of the
-  old branch point, suite at 69/69, build green
+  review passes with all confirmed findings fixed, plus the extension
+  lockdown `8afc379`). 22 commits ahead of the old branch point, suite at
+  69/69, build green
 - **Then review `zach/design-skin`** (branched from phase2-accounts: nav,
   vote-wheel motion, copy sweep, one review pass with 13 findings fixed).
   9 commits, suite 69/69, build green. Merging design-skin brings
@@ -54,8 +55,10 @@ On `zach/design-skin`, additionally:
   exists: `npx convex env set INVITE_CODE <value> --prod`. Signups are
   rejected while unset (fail closed). The dev deployment already has a random
   one (`npx convex env get INVITE_CODE`)
-- **Set WARMLINE_EXTENSION_TOKEN on any deployment where the extension should
-  work.** Extension routes are now fail-closed: unset token = anonymous 401s
+- **WARMLINE_EXTENSION_TOKEN is retired** (`8afc379` on zach/phase2-accounts):
+  extension routes accept only a signed-in user's JWT and write to the
+  caller's own graph. Unset the env var wherever it exists; the Chrome
+  extension needs Convex Auth wiring before it works again
 - **Revisit the convex/limits.ts numbers after a few days of E3 logs**
   (the 14:00 UTC `[usage]` line and `usage:adminToday`). free judge=25,
   embed=400, scrape=5; global judge=400, embed=4000, scrape=40; cron 6
@@ -65,7 +68,7 @@ On `zach/design-skin`, additionally:
 
 - Buy the domain; set up Vercel (this repo builds clean with
   `npm run build`) and a production Convex deployment; set OPENAI_API_KEY,
-  INVITE_CODE, WARMLINE_EXTENSION_TOKEN, and the OAuth client env vars there
+  INVITE_CODE, and the OAuth client env vars there
 - The Convex Auth prod setup needs JWT keys on the prod deployment
   (`npx @convex-dev/auth` or the dashboard init)
 
@@ -74,11 +77,13 @@ On `zach/design-skin`, additionally:
 - **Commit the design reference PNGs** (task 5 found none anywhere in the
   repo, so the Happenstance-caliber screen rebuild never ran). Put them under
   `design/` and re-run the skin task
-- **Decide: should production reject token-gated extension writes into the
-  demo account?** Anonymous writes are already rejected; with the token, real
-  LinkedIn names you browse can enter the publicly visible demo. The privacy
-  page words around this ("a demo account we curate"), but fully-synthetic
-  is cleaner
+- ~~Decide: token-gated extension writes into the demo account~~ **RESOLVED
+  1 July 2026**: the token path is removed entirely in `8afc379` on
+  zach/phase2-accounts. Extension writes require a signed-in user and land in
+  the caller's own graph; demo content changes only via the cron and internal
+  admin loaders. The demo is now unconditionally synthetic, so consider
+  simplifying the privacy page's "a demo account we curate" wording back to
+  plain "synthetic people" when you next touch it
 - **Read /privacy and /terms for voice.** They were written to be honest and
   plain, and they now enumerate raw export files, connected-account emails,
   and cached photos; make sure the tone is yours
