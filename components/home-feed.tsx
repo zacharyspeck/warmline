@@ -53,6 +53,17 @@ export default function HomeFeed() {
   );
   const demoteSeq = useRef(0);
 
+  // When the server pushes a fresh feed (the daily re-rank landing
+  // mid-session, or any recommendations change), the new order is
+  // authoritative: drop the local demotions rather than pinning up-voted
+  // rows below people the new rank scored lower. Reset-during-render is
+  // React's pattern for state that derives from a changed subscription value.
+  const [lastFeed, setLastFeed] = useState(feed);
+  if (feed !== lastFeed) {
+    setLastFeed(feed);
+    if (demoted.size > 0) setDemoted(new Map());
+  }
+
   const rows = useMemo(() => {
     const data = [...(feed ?? [])].sort((a, b) => b.score - a.score);
     if (demoted.size === 0) return data;

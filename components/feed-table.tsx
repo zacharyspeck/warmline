@@ -92,7 +92,12 @@ export function FeedTable({
               onToggle={() =>
                 setExpanded((cur) => (cur === row.id ? null : row.id))
               }
-              onVote={(v) => onVote(row.id, v === "good" ? "up" : "down")}
+              onVote={(v) => {
+                // A vote closes the row's accordion: the row is about to
+                // cycle away, and its open panel must not be left behind.
+                setExpanded((cur) => (cur === row.id ? null : cur));
+                onVote(row.id, v === "good" ? "up" : "down");
+              }}
               renderGraph={renderGraph}
             />
           ))}
@@ -329,7 +334,17 @@ function FeedRowView({
       </MotionTableRow>
 
       {expanded && (
-        <TableRow>
+        // The accordion is a motion row with the SAME transition as its
+        // parent, so when rows above reorder the pair translates together
+        // instead of the panel snapping away from its row.
+        <MotionTableRow
+          layout="position"
+          transition={
+            reduceMotion
+              ? { duration: 0 }
+              : { type: "spring", duration: 0.35, bounce: 0.15 }
+          }
+        >
           <TableCell colSpan={6} className="bg-muted/10 p-3">
             {row.opener ? (
               <div className="mb-3 rounded-lg border border-border bg-card p-3 [box-shadow:var(--shadow-s)]">
@@ -341,7 +356,7 @@ function FeedRowView({
             ) : null}
             {renderGraph(row.id)}
           </TableCell>
-        </TableRow>
+        </MotionTableRow>
       )}
     </>
   );
