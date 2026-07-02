@@ -7,7 +7,7 @@ import Link from "next/link";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { FeedList } from "@/components/feed-list";
-import { WarmGraph } from "@/components/warm-graph";
+import { WarmPath } from "@/components/warm-path";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -94,5 +94,5 @@ function DemoGraphAccordion({ personId }: { personId: Id<"persons"> }) {
         Tracing the warm path…
       </div>
     );
-  return <WarmGraph data={data} />;
+  return <WarmPath data={data} />;
 }

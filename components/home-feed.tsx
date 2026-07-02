@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { FeedList } from "@/components/feed-list";
-import { WarmGraph } from "@/components/warm-graph";
+import { WarmPath } from "@/components/warm-path";
 
 // The signed-in feed. Rendered by app/page.tsx only for authenticated visitors
 // (the server branches on the auth cookie); signed-out visitors get the demo
@@ -132,9 +132,9 @@ function GraphAccordion({ personId }: { personId: Id<"persons"> }) {
   const data = useQuery(api.graph.pathForPerson, { personId });
   if (data === undefined)
     return (
-      <div className="flex h-[200px] items-center justify-center text-xs text-muted-foreground">
+      <div className="flex h-[160px] items-center justify-center text-xs text-muted-foreground">
         Tracing the warm path…
       </div>
     );
-  return <WarmGraph data={data} />;
+  return <WarmPath data={data} />;
 }

@@ -356,21 +356,64 @@ function FeedCard({
       </div>
 
       {expanded && (
+        // S6: the expanded person view — the warm path on top, then why they
+        // fit beside the drafted opener.
         <div
           className="mt-4 border-t border-border pt-4"
           onClick={(e) => e.stopPropagation()}
         >
-          {row.opener ? (
-            <div className="mb-3 rounded-lg border border-border bg-background/40 p-3">
-              <div className="mb-1 text-xs font-medium text-muted-foreground">
-                Drafted opener
-              </div>
-              <p className="text-sm text-foreground">{row.opener}</p>
-            </div>
-          ) : null}
           {renderGraph(row.id)}
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/60">
+                Why {row.name.split(/\s+/)[0]} fits
+              </p>
+              <ul className="mt-2.5 space-y-2">
+                {row.why.map((b, i) => (
+                  <li
+                    key={i}
+                    className="flex items-start gap-2 text-[13.5px] leading-snug text-secondary-foreground"
+                  >
+                    <span
+                      className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary"
+                      aria-hidden
+                    />
+                    {b.text}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            {row.opener ? <OpenerCard opener={row.opener} /> : null}
+          </div>
         </div>
       )}
     </motion.article>
+  );
+}
+
+function OpenerCard({ opener }: { opener: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex flex-col rounded-xl border border-border bg-background/40 p-4">
+      <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/60">
+        Drafted opener
+      </p>
+      <p className="mt-2 flex-1 text-sm leading-relaxed text-foreground">
+        &ldquo;{opener}&rdquo;
+      </p>
+      <Button
+        variant="primary"
+        size="sm"
+        className="mt-3 self-start"
+        onClick={() => {
+          void navigator.clipboard.writeText(opener).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1600);
+          });
+        }}
+      >
+        {copied ? "Copied" : "Copy opener"}
+      </Button>
+    </div>
   );
 }
