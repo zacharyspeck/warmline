@@ -3,17 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -21,25 +13,9 @@ import {
   ThinkingSteps,
   type StepStatus,
 } from "@/components/ui/thinking-steps";
-import {
-  CheckIcon,
-  UploadIcon,
-  DownloadIcon,
-  FileTextIcon,
-  ExternalLinkIcon,
-} from "@/components/icons";
-import {
-  ChromeIcon,
-  GoogleIcon,
-  InstagramIcon,
-  LinkedinIcon,
-  LumaIcon,
-  OutlookIcon,
-  XIcon,
-} from "@/components/icons/brand";
 import { cn } from "@/lib/utils";
 import { WarmlineMark } from "@/components/warmline-mark";
-import type { Provider } from "@/app/connectors/connectors-config";
+import { ConnectorsSurface } from "@/components/connectors-surface";
 
 const PROCESSING_STEPS = [
   "Reading your product site",
@@ -49,8 +25,9 @@ const PROCESSING_STEPS = [
   "Ranking & drafting openers",
 ];
 
-type ConnectedMap = Partial<Record<Provider, boolean>>;
-
+// Onboarding is goal, then connect: audience → product → processing (the
+// goal is derived and saved here) → connect your network (the same surface
+// as /connectors, skippable) → the feed.
 export default function Onboarding() {
   const router = useRouter();
   // Non-null when the user has already onboarded: re-running the wizard
@@ -58,20 +35,14 @@ export default function Onboarding() {
   // exit and a plain warning instead of a silent reset.
   const existingIcp = useQuery(api.icp.latest, {});
   const generate = useAction(api.onboard.generate);
-  const generateUploadUrl = useMutation(api.connectors.generateUploadUrl);
-  const recordUpload = useMutation(api.connectors.recordUpload);
-  const parseLinkedIn = useAction(api.linkedinImport.parseLinkedInExport);
 
   const [phase, setPhase] = useState<
-    "audience" | "product" | "connect" | "processing"
+    "audience" | "product" | "processing" | "connect"
   >("audience");
   const [audience, setAudience] = useState<"individual" | "company">("company");
   const [website, setWebsite] = useState("");
   const [linkedin, setLinkedin] = useState("");
   const [x, setX] = useState("");
-  const [connected, setConnected] = useState<ConnectedMap>({});
-  const [uploadBusy, setUploadBusy] = useState<Partial<Record<Provider, boolean>>>({});
-  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const [step, setStep] = useState(0);
   const [elapsed, setElapsed] = useState(0);
@@ -84,47 +55,9 @@ export default function Onboarding() {
     if (elapsedTimer.current) clearInterval(elapsedTimer.current);
   }, []);
 
-  function markConnected(provider: Provider) {
-    setConnected((c) => ({ ...c, [provider]: true }));
-  }
-
-  async function handleFileUpload(provider: Provider, file: File, parse?: boolean) {
-    try {
-      setUploadBusy((b) => ({ ...b, [provider]: true }));
-      setUploadError(null);
-      const url = await generateUploadUrl();
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-        body: file,
-      });
-      if (!res.ok) throw new Error("Upload failed");
-      const { storageId } = (await res.json()) as { storageId: Id<"_storage"> };
-      await recordUpload({
-        provider,
-        method: "manual",
-        label: `${provider} data`,
-        fileName: file.name,
-        storageId,
-      });
-      if (parse && provider === "linkedin") {
-        await parseLinkedIn({ storageId });
-      }
-      markConnected(provider);
-    } catch (e) {
-      setUploadError(e instanceof Error ? e.message : "Upload failed");
-    } finally {
-      setUploadBusy((b) => ({ ...b, [provider]: false }));
-    }
-  }
-
-  async function handleExtensionRecord() {
-    await recordUpload({ provider: "extension", method: "extension", label: "Chrome extension" });
-    markConnected("extension");
-  }
-
   async function startProcessing() {
     setPhase("processing");
+    setProcessError(null);
     setStep(0);
     setElapsed(0);
     timer.current = setInterval(() => {
@@ -145,10 +78,10 @@ export default function Onboarding() {
         audience,
       });
       setStep(PROCESSING_STEPS.length);
-      setTimeout(() => router.push("/"), 1400);
+      setTimeout(() => setPhase("connect"), 1200);
     } catch (e) {
       setProcessError(e instanceof Error ? e.message : "Something went wrong");
-      setPhase("connect");
+      setPhase("product");
     } finally {
       if (timer.current) clearInterval(timer.current);
       if (elapsedTimer.current) clearInterval(elapsedTimer.current);
@@ -194,7 +127,10 @@ export default function Onboarding() {
             </div>
           )}
         </div>
-        {existingIcp && phase !== "processing" && (
+        {/* Only before the goal is rebuilt — once generate ran, the fresh
+            goal exists and the warning would be stale (and would wrongly
+            show for brand-new accounts on the connect step). */}
+        {existingIcp && (phase === "audience" || phase === "product") && (
           <p className="mb-6 rounded-lg border border-border bg-card px-3 py-2 text-center text-xs text-muted-foreground">
             You already have a goal and feed. Finishing this flow replaces
             them with a fresh goal and re-ranks from scratch
@@ -210,33 +146,28 @@ export default function Onboarding() {
         )}
 
         {phase === "product" && (
-          <ProductStep
-            audience={audience}
-            website={website}
-            linkedin={linkedin}
-            x={x}
-            onWebsite={setWebsite}
-            onLinkedin={setLinkedin}
-            onX={setX}
-            onNext={() => setPhase("connect")}
-          />
-        )}
-
-        {phase === "connect" && (
-          <ConnectStep
-            connected={connected}
-            uploadBusy={uploadBusy}
-            uploadError={uploadError}
-            onFileUpload={handleFileUpload}
-            onExtensionRecord={handleExtensionRecord}
-            onBuild={startProcessing}
-            error={processError}
-          />
+          <>
+            <ProductStep
+              audience={audience}
+              website={website}
+              linkedin={linkedin}
+              x={x}
+              onWebsite={setWebsite}
+              onLinkedin={setLinkedin}
+              onX={setX}
+              onNext={() => void startProcessing()}
+            />
+            {processError && (
+              <p className="mt-3 text-center text-sm text-destructive-foreground">
+                {processError}
+              </p>
+            )}
+          </>
         )}
 
         {phase === "processing" && (
           <div className="rounded-xl border border-border bg-card p-5 [box-shadow:var(--shadow-s)]">
-            <p className="mb-4 text-sm font-medium text-foreground">Building your warm network…</p>
+            <p className="mb-4 text-sm font-medium text-foreground">Building your goal…</p>
             <ThinkingSteps>
               {PROCESSING_STEPS.map((title, i) => (
                 <ThinkingStep
@@ -255,8 +186,39 @@ export default function Onboarding() {
               ))}
             </ThinkingSteps>
             {step >= PROCESSING_STEPS.length && (
-              <p className="mt-3 text-sm font-medium text-foreground">Done, opening your feed…</p>
+              <p className="mt-3 text-sm font-medium text-foreground">Goal set. Next: connect your network…</p>
             )}
+          </div>
+        )}
+
+        {phase === "connect" && (
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight">Connect your network</h1>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              The more contacts you add, the warmer your paths. Your feed ranks
+              whatever you connect
+            </p>
+
+            <div className="mt-6">
+              <ConnectorsSurface />
+            </div>
+
+            <div className="mt-6 flex flex-col gap-2">
+              <Button
+                onClick={() => router.push("/")}
+                variant="primary"
+                className="h-11 w-full"
+              >
+                Continue to your feed
+              </Button>
+              <button
+                type="button"
+                onClick={() => router.push("/")}
+                className="py-1 text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Skip for now, you can connect sources any time from Connectors
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -403,312 +365,5 @@ function Field({
       <Label>{label}</Label>
       <Input type={type} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus} />
     </div>
-  );
-}
-
-function ConnectStep({
-  connected, uploadBusy, uploadError,
-  onFileUpload, onExtensionRecord, onBuild, error,
-}: {
-  connected: ConnectedMap;
-  uploadBusy: Partial<Record<Provider, boolean>>;
-  uploadError: string | null;
-  onFileUpload: (p: Provider, f: File, parse?: boolean) => void;
-  onExtensionRecord: () => void;
-  onBuild: () => void;
-  error: string | null;
-}) {
-  const connectedCount = Object.values(connected).filter(Boolean).length;
-
-  return (
-    <div>
-      <h1 className="text-xl font-semibold tracking-tight">Connect your network</h1>
-      <p className="mt-1.5 text-sm text-muted-foreground">
-        The more contacts you add, the warmer your paths
-      </p>
-
-      <div className="mt-6 grid grid-cols-2 gap-2.5">
-        <div className="col-span-2">
-          <ExtensionCard
-            connected={!!connected.extension}
-            onMark={onExtensionRecord}
-          />
-        </div>
-
-        <OAuthCard
-          Icon={GoogleIcon}
-          name="Google"
-          blurb="Contacts and calendar"
-          connected={!!connected.google}
-          startUrl="/api/connectors/google"
-        />
-
-        <OAuthCard
-          Icon={OutlookIcon}
-          name="Outlook"
-          blurb="Import your Outlook contacts"
-          connected={!!connected.outlook}
-          startUrl="/api/connectors/outlook"
-        />
-
-        <FileCard
-          Icon={LinkedinIcon}
-          name="LinkedIn"
-          blurb="Import your connections export"
-          connected={!!connected.linkedin}
-          busy={!!uploadBusy.linkedin}
-          accept=".zip,application/zip"
-          acceptLabel="ZIP file"
-          exportUrl="https://www.linkedin.com/mypreferences/d/download-my-data"
-          guide={[
-            { text: "Select Download larger data archive (top option)", warn: "Second option won't include connections" },
-            { text: "Click Request archive; LinkedIn emails it in about 10 min" },
-          ]}
-          onFile={(f) => onFileUpload("linkedin", f, true)}
-        />
-
-        <FileCard
-          Icon={XIcon}
-          name="Twitter / X"
-          blurb="Import your followers archive"
-          connected={!!connected.twitter}
-          busy={!!uploadBusy.twitter}
-          accept=".zip,application/zip"
-          acceptLabel="ZIP file"
-          exportUrl="https://x.com/settings/download_your_data"
-          guide={[{ text: "Request your archive on the next screen" }]}
-          onFile={(f) => onFileUpload("twitter", f)}
-        />
-
-        <FileCard
-          Icon={LumaIcon}
-          name="Luma"
-          blurb="Add guests from events you host"
-          connected={!!connected.luma}
-          busy={!!uploadBusy.luma}
-          accept=".csv,text/csv"
-          acceptLabel="CSV file"
-          exportUrl="https://lu.ma/home"
-          guide={[
-            { text: "Open an event you host → Guests tab" },
-            { text: "Click Export and download as CSV" },
-          ]}
-          onFile={(f) => onFileUpload("luma", f)}
-        />
-
-        <FileCard
-          Icon={InstagramIcon}
-          name="Instagram"
-          blurb="Add your mutual followers"
-          connected={!!connected.instagram}
-          busy={!!uploadBusy.instagram}
-          accept=".zip,.json,.html,application/zip,application/json,text/html"
-          acceptLabel="ZIP, JSON, or HTML"
-          exportUrl="https://accountscenter.instagram.com/info_and_permissions/dyi/"
-          guide={[{ text: "Request a download → Connections → JSON or HTML" }]}
-          onFile={(f) => onFileUpload("instagram", f)}
-        />
-      </div>
-
-      {uploadError && <p className="mt-3 text-xs text-destructive-foreground">{uploadError}</p>}
-      {error && <p className="mt-3 text-sm text-destructive-foreground">{error}</p>}
-
-      <div className="mt-6 flex flex-col gap-2">
-        <Button onClick={onBuild} className="w-full">Build my network</Button>
-        {connectedCount === 0 && (
-          <p className="text-center text-xs text-muted-foreground">
-            No sources yet, you can connect them later in Settings
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SourceCard({
-  Icon, name, blurb, connected, children,
-}: {
-  Icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
-  name: string; blurb: string; connected: boolean;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className={cn(
-      "rounded-xl border bg-card p-4 [box-shadow:var(--shadow-s)]",
-      connected ? "border-[oklch(0.42_0.11_152/0.4)]" : "border-border",
-    )}>
-      <div className="flex items-start gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg [background-image:var(--velour-raised)] [box-shadow:var(--shadow-button)]">
-          <Icon className="size-4.5" aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-foreground">{name}</span>
-            {connected && (
-              <span className="flex items-center gap-1 rounded-full bg-[oklch(0.92_0.06_150)] px-2 py-0.5 text-[11px] font-medium text-[oklch(0.42_0.11_152)]">
-                <CheckIcon className="size-2.5" aria-hidden />
-                Connected
-              </span>
-            )}
-          </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{blurb}</p>
-        </div>
-      </div>
-      {children && <div className="mt-3">{children}</div>}
-    </div>
-  );
-}
-
-function OAuthCard({
-  Icon, name, blurb, connected, startUrl,
-}: {
-  Icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
-  name: string; blurb: string;
-  connected: boolean; startUrl: string;
-}) {
-  return (
-    <div className={cn(
-      "flex items-center gap-3 rounded-xl border bg-card p-4 [box-shadow:var(--shadow-s)]",
-      connected ? "border-[oklch(0.42_0.11_152/0.4)]" : "border-border",
-    )}>
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg [background-image:var(--velour-raised)] [box-shadow:var(--shadow-button)]">
-        <Icon className="size-4.5" aria-hidden />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-foreground">{name}</span>
-          {connected && (
-            <span className="flex items-center gap-1 rounded-full bg-[oklch(0.92_0.06_150)] px-2 py-0.5 text-[11px] font-medium text-[oklch(0.42_0.11_152)]">
-              <CheckIcon className="size-2.5" aria-hidden />
-              Connected
-            </span>
-          )}
-        </div>
-        <p className="mt-0.5 text-xs text-muted-foreground">{blurb}</p>
-      </div>
-      {!connected && (
-        <Button asChild size="sm" variant="outline" className="shrink-0 gap-1.5">
-          <a href={startUrl}>
-            <Icon className="size-3.5" aria-hidden />
-            Connect
-          </a>
-        </Button>
-      )}
-    </div>
-  );
-}
-
-function FileCard({
-  Icon, name, blurb, connected, busy, accept, acceptLabel,
-  exportUrl, guide, onFile,
-}: {
-  Icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
-  name: string; blurb: string;
-  connected: boolean; busy: boolean;
-  accept: string; acceptLabel: string;
-  exportUrl: string;
-  guide: { text: string; warn?: string }[];
-  onFile: (f: File) => void;
-}) {
-  return (
-    <SourceCard Icon={Icon} name={name} blurb={blurb} connected={connected}>
-      {!connected && (
-        <div className="flex flex-col gap-2.5">
-          <Dialog>
-            <DialogTrigger asChild>
-              <button
-                type="button"
-                className="flex cursor-pointer items-center gap-1.5 text-left text-xs font-medium text-primary/70 hover:text-primary"
-              >
-                <FileTextIcon className="size-3.5 shrink-0 text-primary" aria-hidden />
-                How to export your data
-              </button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Export from {name}</DialogTitle>
-              </DialogHeader>
-              <ol className="flex flex-col gap-3 pt-1">
-                {guide.map((s, i) => (
-                  <li key={i} className="flex gap-3 text-sm text-secondary-foreground">
-                    <span className="flex size-5 shrink-0 items-center justify-center rounded bg-primary/15 text-[11px] font-semibold text-primary">{i + 1}</span>
-                    <span>{s.text}{s.warn && <span className="mt-1 block text-[oklch(0.78_0.14_22)] text-xs">{s.warn}</span>}</span>
-                  </li>
-                ))}
-              </ol>
-              <Button asChild variant="outline" className="mt-2 gap-1.5">
-                <a href={exportUrl} target="_blank" rel="noopener noreferrer">
-                  Open {name} export <ExternalLinkIcon className="size-3.5" aria-hidden />
-                </a>
-              </Button>
-            </DialogContent>
-          </Dialog>
-          <Dropzone accept={accept} acceptLabel={acceptLabel} busy={busy} onFile={onFile} />
-        </div>
-      )}
-    </SourceCard>
-  );
-}
-
-function ExtensionCard({ connected, onMark }: { connected: boolean; onMark: () => void }) {
-  return (
-    <SourceCard Icon={ChromeIcon} name="Chrome Extension" blurb="Capture LinkedIn mutual connections as you browse" connected={connected}>
-      {!connected && (
-        <div className="flex flex-col gap-3">
-          <ol className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-            {[
-              "Download the Warmline extension and unzip it",
-              "Open chrome://extensions, enable Developer mode",
-              "Click Load unpacked and select the folder",
-              "Open a lead's LinkedIn profile to capture mutuals",
-            ].map((text, i) => (
-              <li key={i} className="flex gap-2 text-xs text-secondary-foreground">
-                <span className="flex size-4 shrink-0 items-center justify-center rounded bg-primary/15 text-[10px] font-semibold text-primary">{i + 1}</span>
-                {text}
-              </li>
-            ))}
-          </ol>
-          <div className="flex gap-2">
-            <Button asChild variant="outline" size="sm" className="gap-1.5">
-              <a href="https://github.com/warmline/extension/releases/latest" target="_blank" rel="noopener noreferrer">
-                <DownloadIcon className="size-3.5" aria-hidden />
-                Download
-              </a>
-            </Button>
-            <Button size="sm" variant="ghost" className="gap-1.5" onClick={onMark}>
-              <CheckIcon className="size-3.5" aria-hidden />
-              Mark installed
-            </Button>
-          </div>
-        </div>
-      )}
-    </SourceCard>
-  );
-}
-
-function Dropzone({
-  accept, acceptLabel, busy, onFile,
-}: {
-  accept: string; acceptLabel: string; busy: boolean; onFile: (f: File) => void;
-}) {
-  const [dragging, setDragging] = useState(false);
-  function handle(files: FileList | null) { const f = files?.[0]; if (f) onFile(f); }
-  return (
-    <label
-      onDragOver={(e) => { e.preventDefault(); if (!busy) setDragging(true); }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={(e) => { e.preventDefault(); setDragging(false); if (!busy) handle(e.dataTransfer.files); }}
-      className={cn(
-        "flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-dashed p-4 text-center transition-colors [box-shadow:var(--shadow-inset)]",
-        dragging ? "border-ring/60 bg-primary/5" : "border-border bg-input hover:border-ring/30",
-        busy && "pointer-events-none opacity-60",
-      )}
-    >
-      <UploadIcon className="size-4 text-muted-foreground" aria-hidden />
-      <span className="text-xs font-medium text-foreground/85">
-        {busy ? "Importing…" : `Drop ${acceptLabel} here or click to browse`}
-      </span>
-      <input type="file" accept={accept} disabled={busy} className="hidden" onChange={(e) => handle(e.target.files)} />
-    </label>
   );
 }
