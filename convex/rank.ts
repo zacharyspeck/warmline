@@ -2,8 +2,10 @@ import {
   internalAction,
   internalMutation,
   internalQuery,
+  type ActionCtx,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { embed, judge } from "./openai";
@@ -17,6 +19,10 @@ import {
 
 const CANDIDATE_LIMIT = 120;
 const DEFAULT_JUDGE_TOP_N = 12;
+// How many connector recommendations a zero-lead rank keeps. Covers the home
+// feed's read (limit 40 → take 80 recs) with headroom; the rest of the
+// connectors stay on the feed's tieStrength fallback.
+const CONNECTOR_REC_LIMIT = 100;
 // How hard thumbs bend the ICP vector on each rank run. Bounded step in [0,1];
 // small so a few votes tilt the ranking without overwhelming the goal-fit.
 const VOTE_NUDGE = 0.15;
@@ -149,6 +155,113 @@ export const upsertVector = internalMutation({
         personId: args.personId,
         embedding: args.embedding,
       });
+    return null;
+  },
+});
+
+// One page of a user's connectors joined to their cached vectors — the
+// zero-lead rank walks EVERY connector this way (bounded reads per call), so
+// large imports rank progressively instead of stopping at a candidate cap.
+export const connectorPage = internalQuery({
+  args: { userId: v.id("users"), paginationOpts: paginationOptsValidator },
+  returns: v.object({
+    connectors: v.array(
+      v.object({
+        id: v.id("persons"),
+        name: v.string(),
+        headline: v.union(v.string(), v.null()),
+        company: v.union(v.string(), v.null()),
+        tieStrength: v.union(v.number(), v.null()),
+        vector: v.union(v.array(v.number()), v.null()),
+      }),
+    ),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    const page = await ctx.db
+      .query("persons")
+      .withIndex("by_user_and_role", (q) =>
+        q.eq("userId", args.userId).eq("role", "connector"),
+      )
+      .paginate(args.paginationOpts);
+    const connectors = [];
+    for (const p of page.page) {
+      if (p.isSelf) continue;
+      const vec = await ctx.db
+        .query("personVectors")
+        .withIndex("by_person", (q) => q.eq("personId", p._id))
+        .first();
+      connectors.push({
+        id: p._id,
+        name: p.name,
+        headline: p.headline ?? null,
+        company: p.company ?? null,
+        tieStrength: p.tieStrength ?? null,
+        vector: vec?.embedding ?? null,
+      });
+    }
+    return {
+      connectors,
+      isDone: page.isDone,
+      continueCursor: page.continueCursor,
+    };
+  },
+});
+
+// Swap this icp's connector recommendations in ONE transaction: wipe the old
+// set, insert the new. The feed never observes a half-written mix. Every
+// person is re-checked against the icp's owner, mirroring writeRecommendation.
+export const replaceConnectorRecs = internalMutation({
+  args: {
+    icpId: v.id("icp"),
+    recs: v.array(
+      v.object({
+        personId: v.id("persons"),
+        score: v.number(),
+        whyBullets: v.array(
+          v.object({ text: v.string(), confidence: v.number() }),
+        ),
+        how: v.array(v.string()),
+      }),
+    ),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const icp = await ctx.db.get(args.icpId);
+    if (!icp) throw new Error("icp not found");
+    for (;;) {
+      const batch = await ctx.db
+        .query("recommendations")
+        .withIndex("by_icp_and_kind", (q) =>
+          q.eq("icpId", args.icpId).eq("kind", "connector"),
+        )
+        .take(500);
+      for (const r of batch) await ctx.db.delete(r._id);
+      if (batch.length < 500) break;
+    }
+    for (const rec of args.recs) {
+      const person = await ctx.db.get(rec.personId);
+      if (
+        !person ||
+        person.userId !== icp.userId ||
+        person.role !== "connector" ||
+        person.isSelf
+      )
+        continue;
+      await ctx.db.insert("recommendations", {
+        userId: icp.userId,
+        personId: rec.personId,
+        icpId: args.icpId,
+        kind: "connector",
+        score: rec.score,
+        whyBullets: rec.whyBullets,
+        how: rec.how,
+        opener: "",
+        unlocksIds: [],
+        judged: false,
+      });
+    }
     return null;
   },
 });
@@ -304,6 +417,173 @@ function heuristicCopy(lead: {
   return { whyBullets, how };
 }
 
+// Heuristic why/how for a connector recommendation (zero-lead mode never
+// judges — connectors get the same degraded-copy style as a capped lead).
+function connectorCopy(c: {
+  name: string;
+  headline: string | null;
+  company: string | null;
+}): { whyBullets: { text: string; confidence: number }[]; how: string[] } {
+  const whyBullets: { text: string; confidence: number }[] = [];
+  const facts = [c.headline, c.company].filter(Boolean).join(" · ");
+  if (facts) whyBullets.push({ text: facts, confidence: 0.9 });
+  whyBullets.push({ text: "Already in your network", confidence: 0.6 });
+  const first = c.name.split(" ")[0];
+  const domain = c.company ? `in ${c.company}'s network` : "in their network";
+  return {
+    whyBullets,
+    how: [
+      `Reconnect with ${first} and share who you're trying to reach`,
+      `Ask if they know any founders or PMs ${domain} who fit your ICP`,
+    ],
+  };
+}
+
+type ScoredConnector = {
+  id: Id<"persons">;
+  name: string;
+  headline: string | null;
+  company: string | null;
+  score: number;
+};
+
+// Zero-lead rank: score EVERY connector by goal fit against the ICP vector,
+// embedding only the ones without a cached vector under ONE batched embed
+// reserve (warmest ties first, so a short grant covers the most valuable
+// people). Whoever stays unembedded keeps no recommendation and rides the
+// feed's tieStrength fallback; the daily cron re-runs this with fresh budget
+// and finishes the remainder. No judge calls — copy is heuristic.
+async function rankConnectorsOnly(
+  ctx: ActionCtx,
+  input: {
+    icpId: Id<"icp">;
+    owner: Id<"users">;
+    scoringVector: number[] | null;
+    embedsSkipped: number;
+  },
+): Promise<{
+  scored: number;
+  judged: number;
+  judgeDegraded: number;
+  embedsSkipped: number;
+}> {
+  let embedsSkipped = input.embedsSkipped;
+  let scoredCount = 0;
+  const top: ScoredConnector[] = [];
+  const keepTop = (item: ScoredConnector) => {
+    top.push(item);
+    if (top.length > CONNECTOR_REC_LIMIT * 2) {
+      top.sort((a, b) => b.score - a.score);
+      top.length = CONNECTOR_REC_LIMIT;
+    }
+  };
+  const scoreOf = (vec: number[], tie: number | null) =>
+    input.scoringVector
+      ? feedScore(
+          (cosine(vec, input.scoringVector) + 1) / 2,
+          reachability("connected", tie ?? undefined),
+        )
+      : null;
+
+  const missing: {
+    id: Id<"persons">;
+    name: string;
+    headline: string | null;
+    company: string | null;
+    tie: number | null;
+  }[] = [];
+  let cursor: string | null = null;
+  for (;;) {
+    const page: {
+      connectors: {
+        id: Id<"persons">;
+        name: string;
+        headline: string | null;
+        company: string | null;
+        tieStrength: number | null;
+        vector: number[] | null;
+      }[];
+      isDone: boolean;
+      continueCursor: string;
+    } = await ctx.runQuery(internal.rank.connectorPage, {
+      userId: input.owner,
+      paginationOpts: { numItems: 50, cursor },
+    });
+    for (const c of page.connectors) {
+      if (c.vector) {
+        const score = scoreOf(c.vector, c.tieStrength);
+        if (score !== null) {
+          keepTop({
+            id: c.id,
+            name: c.name,
+            headline: c.headline,
+            company: c.company,
+            score,
+          });
+          scoredCount++;
+        }
+      } else {
+        missing.push({
+          id: c.id,
+          name: c.name,
+          headline: c.headline,
+          company: c.company,
+          tie: c.tieStrength,
+        });
+      }
+    }
+    if (page.isDone) break;
+    cursor = page.continueCursor;
+  }
+
+  // ONE batched reserve for everyone missing a vector; embed while the grant
+  // lasts. A zero grant (capped) embeds nothing — cached vectors still rank.
+  if (missing.length > 0) {
+    missing.sort((a, b) => (b.tie ?? 0) - (a.tie ?? 0));
+    const { granted } = await ctx.runMutation(internal.usage.reserve, {
+      userId: input.owner,
+      category: "embed",
+      count: missing.length,
+    });
+    embedsSkipped += missing.length - granted;
+    for (const m of missing.slice(0, granted)) {
+      const text = [m.name, m.headline, m.company].filter(Boolean).join(" — ");
+      const vec = await embed(text);
+      await ctx.runMutation(internal.rank.upsertVector, {
+        personId: m.id,
+        embedding: vec,
+      });
+      const score = scoreOf(vec, m.tie);
+      if (score !== null) {
+        keepTop({
+          id: m.id,
+          name: m.name,
+          headline: m.headline,
+          company: m.company,
+          score,
+        });
+        scoredCount++;
+      }
+    }
+  }
+
+  top.sort((a, b) => b.score - a.score);
+  const recs = top.slice(0, CONNECTOR_REC_LIMIT).map((c) => {
+    const copy = connectorCopy(c);
+    return {
+      personId: c.id,
+      score: c.score,
+      whyBullets: copy.whyBullets,
+      how: copy.how,
+    };
+  });
+  await ctx.runMutation(internal.rank.replaceConnectorRecs, {
+    icpId: input.icpId,
+    recs,
+  });
+  return { scored: scoredCount, judged: 0, judgeDegraded: 0, embedsSkipped };
+}
+
 // The ranking pipeline: embed → goal-fit × reachability → judge top N → write
 // recs. Every OpenAI call is RESERVED first (usage.reserve, convex/limits.ts);
 // a cap hit DEGRADES instead of throwing:
@@ -330,7 +610,18 @@ export const rebuild = internalAction({
     judgeDegraded: v.number(), // capped judge slots that fell back to copy
     embedsSkipped: v.number(), // capped embeds that kept cache/neutral fit
   }),
-  handler: async (ctx, args) => {
+  // Explicit return type: this handler calls same-file functions through
+  // `internal.rank.*`, which is circular for TypeScript unless the return
+  // type is pinned (see convex guidelines on function calling).
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    scored: number;
+    judged: number;
+    judgeDegraded: number;
+    embedsSkipped: number;
+  }> => {
     const data = await ctx.runQuery(internal.rank.rankData, {
       icpId: args.icpId,
     });
@@ -371,6 +662,24 @@ export const rebuild = internalAction({
           ? nudgeVector(icpVector, up, down, VOTE_NUDGE)
           : icpVector;
     }
+
+    // Zero leads (a fresh connectors-only import): rank the connectors by
+    // goal fit instead — otherwise the feed would stay empty until a lead
+    // ever appears. Same Phase E reserves, no judge spend.
+    if (data.leads.length === 0) {
+      return await rankConnectorsOnly(ctx, {
+        icpId: args.icpId,
+        owner,
+        scoringVector,
+        embedsSkipped,
+      });
+    }
+    // Leads exist: any connector recommendations left over from a zero-lead
+    // era would pollute the lead ranking — drop them (no-op when none).
+    await ctx.runMutation(internal.rank.replaceConnectorRecs, {
+      icpId: args.icpId,
+      recs: [],
+    });
 
     // Reserve embeds for the leads missing a vector in ONE batch; leads past
     // the grant keep no vector this run and score with a neutral goal-fit.

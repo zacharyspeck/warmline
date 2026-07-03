@@ -200,6 +200,7 @@ export default defineSchema({
     judged: v.optional(v.boolean()),
   })
     .index("by_icp_and_score", ["icpId", "score"])
+    .index("by_icp_and_kind", ["icpId", "kind"])
     .index("by_person", ["personId"])
     .index("by_user", ["userId"])
     .index("by_user_and_score", ["userId", "score"]),

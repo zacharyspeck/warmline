@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import {
   action,
+  internalAction,
   internalMutation,
   type MutationCtx,
 } from "./_generated/server";
@@ -9,6 +10,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { unzipSync, strFromU8 } from "fflate";
 import { parseConnections, type ConnRow } from "./linkedinCsv";
 import { Id } from "./_generated/dataModel";
+import { CRON_JUDGE_PER_RUN } from "./limits";
 
 // Parse an uploaded LinkedIn data export (the ZIP from "Download larger data
 // archive") and turn Connections.csv into the CALLER's `persons` rows — your
@@ -40,7 +42,44 @@ export const parseLinkedInExport = action({
       imported += res.imported;
       skipped += res.skipped;
     }
+    // The import is complete: kick the pipeline that turns it into a feed —
+    // bridges + unlock values, then a rank pass — instead of waiting a day
+    // for the cron. Scheduled so the upload response returns immediately.
+    await ctx.scheduler.runAfter(0, internal.linkedinImport.afterImport, {
+      userId,
+    });
     return { imported, skipped };
+  },
+});
+
+// Post-import pipeline: computeEdges, then a rank pass on the newest goal.
+// Spend goes through the same Phase E reserves and per-run judge cap as the
+// daily cron; each step is best-effort so a failure never strands the other.
+export const afterImport = internalAction({
+  args: { userId: v.id("users") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    try {
+      await ctx.runAction(internal.edges.computeEdges, {
+        userId: args.userId,
+      });
+    } catch (err) {
+      console.error(`afterImport: computeEdges failed for ${args.userId}`, err);
+    }
+    try {
+      const icp = await ctx.runQuery(internal.icp.latestForUser, {
+        userId: args.userId,
+      });
+      if (icp)
+        await ctx.runAction(internal.rank.rebuild, {
+          icpId: icp._id,
+          maxJudge: CRON_JUDGE_PER_RUN,
+          skipUnchanged: true,
+        });
+    } catch (err) {
+      console.error(`afterImport: rank failed for ${args.userId}`, err);
+    }
+    return null;
   },
 });
 

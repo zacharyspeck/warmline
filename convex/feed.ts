@@ -3,7 +3,13 @@ import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { QueryCtx } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { initials, confLabel, reachability, introScore } from "./lib";
+import {
+  initials,
+  confLabel,
+  reachability,
+  introScore,
+  feedScore,
+} from "./lib";
 
 // Feed for the list UI. Prefers ranked `recommendations` (real goal-fit + LLM
 // why/how); falls back to a reachability heuristic over `persons` so the list
@@ -205,7 +211,21 @@ export async function feedForUser(
     }
   }
 
-  // Connector rows ALWAYS appear (the "befriend a connector" mode). Top by unlockValue.
+  // Zero leads (a connectors-only network, e.g. a fresh LinkedIn import):
+  // the unlockValue gate would empty the feed forever, since unlock values
+  // only exist where connectors bridge to leads. Sampled with isSelf excluded
+  // because the self row is stored as a connector.
+  const leadSample = await ctx.db
+    .query("persons")
+    .withIndex("by_user_and_role", (q) =>
+      q.eq("userId", userId).eq("role", "lead"),
+    )
+    .take(5);
+  const hasLeads = leadSample.some((p) => !p.isSelf);
+
+  // Connector rows ALWAYS appear (the "befriend a connector" mode). Top by
+  // unlockValue — except with zero leads, where nobody has an unlockValue:
+  // then every connector qualifies, ordered by tieStrength.
   const seen = new Set(pre.map((x) => x.p._id));
   const connectorDocs = await ctx.db
     .query("persons")
@@ -214,14 +234,33 @@ export async function feedForUser(
     )
     .take(400);
   const topConnectors = connectorDocs
-    .filter((c) => !c.isSelf && (c.unlockValue ?? 0) > 0 && !seen.has(c._id))
-    .sort((a, b) => (b.unlockValue ?? 0) - (a.unlockValue ?? 0))
+    .filter(
+      (c) =>
+        !c.isSelf &&
+        !seen.has(c._id) &&
+        (hasLeads ? (c.unlockValue ?? 0) > 0 : true),
+    )
+    .sort((a, b) =>
+      hasLeads
+        ? (b.unlockValue ?? 0) - (a.unlockValue ?? 0)
+        : (b.tieStrength ?? 0) - (a.tieStrength ?? 0),
+    )
     .slice(0, Math.max(5, Math.floor(limit / 3)));
   for (const c of topConnectors) {
     const h = heuristicRow(c);
+    // With zero leads these rows are the goal-fit ranking's DEGRADED tail
+    // (unembedded people): score them with a neutral goal fit, the same
+    // convention a capped rank run uses, so ranked rows interleave honestly
+    // and the unranked order follows tie strength.
+    const score = hasLeads
+      ? h.score
+      : feedScore(
+          0.5,
+          reachability(c.relationshipToYou, c.tieStrength ?? undefined),
+        );
     pre.push({
       p: c,
-      score: h.score,
+      score,
       why: h.why,
       how: await connectorHow(ctx, c),
     });
