@@ -7,6 +7,11 @@ export function WarmlineMark({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 64 64"
+      // Intrinsic size = the intended header size (size-6). Without it an
+      // svg has no dimensions of its own and stretches to its container
+      // whenever the utility class isn't in effect; CSS still overrides.
+      width={24}
+      height={24}
       className={className}
       role="img"
       aria-label="Warmline"
