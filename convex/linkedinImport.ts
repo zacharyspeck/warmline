@@ -42,6 +42,12 @@ export const parseLinkedInExport = action({
       imported += res.imported;
       skipped += res.skipped;
     }
+    // Stamp the parsed contact count on the LinkedIn source row so the
+    // connectors page can show what the import actually produced.
+    await ctx.runMutation(internal.linkedinImport.recordParsedCount, {
+      userId,
+      count: rows.length,
+    });
     // The import is complete: kick the pipeline that turns it into a feed —
     // bridges + unlock values, then a rank pass — instead of waiting a day
     // for the cron. Scheduled so the upload response returns immediately.
@@ -49,6 +55,23 @@ export const parseLinkedInExport = action({
       userId,
     });
     return { imported, skipped };
+  },
+});
+
+// Patch the caller's LinkedIn source row with the count of contacts the
+// export parsed to. No-op when no source row exists (direct backend call).
+export const recordParsedCount = internalMutation({
+  args: { userId: v.id("users"), count: v.number() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const source = await ctx.db
+      .query("connectors")
+      .withIndex("by_user_provider", (q) =>
+        q.eq("userId", args.userId).eq("provider", "linkedin"),
+      )
+      .first();
+    if (source) await ctx.db.patch(source._id, { contactCount: args.count });
+    return null;
   },
 });
 

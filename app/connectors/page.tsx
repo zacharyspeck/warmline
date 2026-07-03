@@ -562,7 +562,15 @@ function RecordRow({ row }: { row: Row }) {
   const subtitle =
     row.method === "oauth"
       ? row.accountEmail ?? "Connected"
-      : `Uploaded on ${format(new Date(row._creationTime), "d MMM yyyy")}`;
+      : [
+          // The parsed contact count, stamped by the import action.
+          row.contactCount !== undefined
+            ? `${row.contactCount.toLocaleString()} contacts`
+            : null,
+          `Uploaded on ${format(new Date(row._creationTime), "d MMM yyyy")}`,
+        ]
+          .filter(Boolean)
+          .join(" · ");
 
   return (
     <div className="flex items-center gap-3 rounded-lg px-3 py-2 [background-image:var(--velour)] [box-shadow:var(--shadow-s)]">

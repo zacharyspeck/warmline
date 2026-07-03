@@ -88,6 +88,9 @@ export default defineSchema({
     fileName: v.optional(v.string()),
     // The stored export file (manual/auto). Parsing into the graph is future work.
     storageId: v.optional(v.id("_storage")),
+    // How many contacts the last parse of this source produced — stamped by
+    // the import action, shown on the source row.
+    contactCount: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
     .index("by_user_provider", ["userId", "provider"]),

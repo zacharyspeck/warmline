@@ -10,6 +10,7 @@ import {
   introScore,
   feedScore,
 } from "./lib";
+import { dayKey, globalDailyCap, userDailyCap } from "./limits";
 
 // Feed for the list UI. Prefers ranked `recommendations` (real goal-fit + LLM
 // why/how); falls back to a reachability heuristic over `persons` so the list
@@ -313,4 +314,69 @@ export const listForUser = internalQuery({
   returns: v.array(feedRow),
   handler: async (ctx, args) =>
     await feedForUser(ctx, args.userId, args.limit ?? 25),
+});
+
+// The feed's lifecycle stage for the signed-in caller — powers the truthful
+// staged empty states: has anything been connected, did an import land
+// people, has a rank pass produced recommendations yet, and is today's embed
+// budget already exhausted (ranking resumes with tomorrow's cron).
+export const status = query({
+  args: {},
+  returns: v.union(
+    v.object({
+      hasSources: v.boolean(),
+      hasPersons: v.boolean(),
+      ranked: v.boolean(),
+      embedCapped: v.boolean(),
+    }),
+    v.null(),
+  ),
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return null;
+    const source = await ctx.db
+      .query("connectors")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .first();
+    // take(2): the only self row a user has must not count as a network.
+    const personSample = await ctx.db
+      .query("persons")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .take(2);
+    const hasPersons = personSample.some((p) => !p.isSelf);
+    const icp = await ctx.db
+      .query("icp")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .order("desc")
+      .first();
+    const rec = icp
+      ? await ctx.db
+          .query("recommendations")
+          .withIndex("by_icp_and_score", (q) => q.eq("icpId", icp._id))
+          .first()
+      : null;
+    // Same remaining-budget math as usage.reserve, read-only.
+    const day = dayKey(Date.now());
+    const user = await ctx.db.get(userId);
+    const userRow = await ctx.db
+      .query("usage")
+      .withIndex("by_user_and_day", (q) =>
+        q.eq("userId", userId).eq("day", day),
+      )
+      .unique();
+    const globalRow = await ctx.db
+      .query("usageGlobal")
+      .withIndex("by_day", (q) => q.eq("day", day))
+      .unique();
+    const remaining = Math.min(
+      userDailyCap(user?.tier, "embed") - (userRow?.embed ?? 0),
+      globalDailyCap("embed") - (globalRow?.embed ?? 0),
+    );
+    return {
+      hasSources: source !== null,
+      hasPersons,
+      ranked: rec !== null,
+      embedCapped: remaining <= 0,
+    };
+  },
 });

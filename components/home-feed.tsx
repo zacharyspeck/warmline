@@ -6,8 +6,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import type { FunctionReturnType } from "convex/server";
 import { FeedList } from "@/components/feed-list";
 import { WarmPath } from "@/components/warm-path";
+import { Button } from "@/components/ui/button";
 
 // The signed-in feed. Rendered by app/page.tsx only for authenticated visitors
 // (the server branches on the auth cookie); signed-out visitors get the demo
@@ -16,6 +18,7 @@ export default function HomeFeed() {
   const router = useRouter();
 
   const feed = useQuery(api.feed.list, { limit: 40 });
+  const status = useQuery(api.feed.status, {});
   const icp = useQuery(api.icp.latest, {});
 
   useEffect(() => {
@@ -106,25 +109,68 @@ export default function HomeFeed() {
           Loading your network…
         </p>
       ) : rows.length === 0 ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">
-          No people yet. Connect a source to load your network
-        </p>
+        <EmptyFeed status={status} />
       ) : (
-        <FeedList
-          rows={rows}
-          voteFor={voteFor}
-          onVote={(personId, v) => {
-            if (icp) {
-              void vote({ icpId: icp._id, personId, vote: v });
-              setDemoted((prev) =>
-                new Map(prev).set(personId, demoteSeq.current++),
-              );
-            }
-          }}
-          renderGraph={(personId) => <GraphAccordion personId={personId} />}
-        />
+        <>
+          {status && status.hasPersons && !status.ranked ? (
+            <p className="mb-4 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+              {status.embedCapped
+                ? "Your network is imported, but today's ranking budget is used up. People are ordered by tie strength until ranking resumes tomorrow"
+                : "Your network is imported. Ranking against your goal is in progress, so this order is provisional"}
+            </p>
+          ) : null}
+          <FeedList
+            rows={rows}
+            voteFor={voteFor}
+            onVote={(personId, v) => {
+              if (icp) {
+                void vote({ icpId: icp._id, personId, vote: v });
+                setDemoted((prev) =>
+                  new Map(prev).set(personId, demoteSeq.current++),
+                );
+              }
+            }}
+            renderGraph={(personId) => <GraphAccordion personId={personId} />}
+          />
+        </>
       )}
     </div>
+  );
+}
+
+// The truthful staged empty states. Which one shows depends on where the
+// pipeline actually is — and "No people yet" NEVER renders when persons exist.
+function EmptyFeed({
+  status,
+}: {
+  status: FunctionReturnType<typeof api.feed.status> | undefined;
+}) {
+  if (!status)
+    return (
+      <p className="py-16 text-center text-sm text-muted-foreground">
+        Loading your network…
+      </p>
+    );
+  if (!status.hasPersons) {
+    return (
+      <div className="py-16 text-center">
+        <p className="text-sm text-muted-foreground">
+          {status.hasSources
+            ? "A source is connected but no contacts have been imported from it yet"
+            : "No sources connected yet. Import your network to build your feed"}
+        </p>
+        <Button variant="primary" asChild className="mt-4">
+          <Link href="/connectors">Connect a source</Link>
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <p className="py-16 text-center text-sm text-muted-foreground">
+      {status.embedCapped
+        ? "Your network is imported, but today's ranking budget is used up. Ranking resumes tomorrow"
+        : "Your network is imported. Ranking against your goal is in progress…"}
+    </p>
   );
 }
 

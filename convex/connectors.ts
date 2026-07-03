@@ -18,6 +18,7 @@ export const list = query({
       accountEmail: v.optional(v.string()),
       fileName: v.optional(v.string()),
       storageId: v.optional(v.id("_storage")),
+      contactCount: v.optional(v.number()),
     }),
   ),
   handler: async (ctx) => {
