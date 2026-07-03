@@ -118,9 +118,7 @@ export default function SignIn() {
 
             {/* OAuth sign-in ("Continue with Google") returns HERE in the
                 OAuth phase, as a divider + provider button above the submit.
-                Email and password is the ONLY login flow until then; the
-                Google/Outlook OAuth under app/api/connectors is data-source
-                permission, not login, and stays. */}
+                Email and password is the ONLY login flow until then. */}
 
             <Button
               type="submit"

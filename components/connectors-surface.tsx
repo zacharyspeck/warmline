@@ -1,37 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { format } from "date-fns";
 import { Toaster, toast } from "sonner";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
-import {
-  CheckIcon,
-  DownloadIcon,
-  ExternalLinkIcon,
-  FileTextIcon,
-  Trash2Icon,
-  UploadIcon,
-  ZapIcon,
-} from "@/components/icons";
+import { CheckIcon, Trash2Icon, UploadIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
   CONNECTORS,
   type ConnectorDef,
-  type Provider,
 } from "@/app/connectors/connectors-config";
 
 type Row = Doc<"connectors">;
@@ -39,9 +20,13 @@ type Row = Doc<"connectors">;
 // The connectors surface (S5): the LinkedIn dropzone hero plus one row per
 // source. Self-contained (owns its query and toasts) so /connectors and the
 // onboarding connect step render exactly the same thing.
+//
+// Honesty pass: only the LinkedIn export upload works today. Every other
+// source stays visible but renders as a disabled Coming soon card — no
+// Connect button, no dropzone, no dialog, no extension download.
 export function ConnectorsSurface() {
   const rows = useQuery(api.connectors.list);
-  const byProvider = useMemo(() => groupByProvider(rows ?? []), [rows]);
+  const linkedinRows = (rows ?? []).filter((r) => r.provider === "linkedin");
 
   return (
     <div>
@@ -50,26 +35,16 @@ export function ConnectorsSurface() {
       {/* S5: LinkedIn is the hero — a working drag-and-drop right on the page. */}
       <LinkedInHero
         def={CONNECTORS.find((d) => d.provider === "linkedin")!}
-        rows={byProvider.linkedin ?? []}
+        rows={linkedinRows}
       />
 
       <section className="mt-3 flex flex-col gap-2.5">
         {CONNECTORS.filter((def) => def.provider !== "linkedin").map((def) => (
-          <ConnectorRow
-            key={def.provider}
-            def={def}
-            rows={byProvider[def.provider] ?? []}
-          />
+          <ComingSoonRow key={def.provider} def={def} />
         ))}
       </section>
     </div>
   );
-}
-
-function groupByProvider(rows: Row[]): Partial<Record<Provider, Row[]>> {
-  const out: Partial<Record<Provider, Row[]>> = {};
-  for (const row of rows) (out[row.provider] ??= []).push(row);
-  return out;
 }
 
 // ── LinkedIn hero: the working drag-and-drop, inline on the page (S5) ───────
@@ -161,317 +136,26 @@ function LinkedInHero({ def, rows }: { def: ConnectorDef; rows: Row[] }) {
   );
 }
 
-// ── A single connector row + its connect dialog ────────────────────────────
-function ConnectorRow({ def, rows }: { def: ConnectorDef; rows: Row[] }) {
-  const [open, setOpen] = useState(false);
+// ── Every other source: visible, but honestly not wired up yet ──────────────
+function ComingSoonRow({ def }: { def: ConnectorDef }) {
   const { Icon } = def;
-  const connected = rows.length > 0;
-  const hasTabs = Boolean(def.auto && def.manual);
-
-  const status = connected
-    ? `Your ${def.name} is connected`
-    : def.blurb;
-
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-4 [box-shadow:var(--shadow-s)]">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg [background-image:var(--velour-raised)] [box-shadow:var(--shadow-button)]">
-          <Icon className="size-5" aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="font-medium">{def.name}</span>
-            {def.beta ? (
-              <Badge variant="secondary" className="text-[10px]">
-                Beta
-              </Badge>
-            ) : null}
-            {connected ? (
-              <Badge variant="success" className="gap-1 text-[10px]">
-                <CheckIcon className="size-2.5" aria-hidden />
-                Active
-              </Badge>
-            ) : null}
-          </div>
-          <p className="truncate text-sm text-muted-foreground">{status}</p>
+    <div
+      aria-disabled
+      className="flex items-center gap-4 rounded-xl border border-border bg-card p-4 opacity-60 [box-shadow:var(--shadow-s)]"
+    >
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-lg [background-image:var(--velour-raised)] [box-shadow:var(--shadow-button)]">
+        <Icon className="size-5" aria-hidden />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{def.name}</span>
+          <Badge variant="secondary" className="text-[10px]">
+            Coming soon
+          </Badge>
         </div>
-        <DialogTrigger asChild>
-          <Button variant={connected ? "outline" : "primary"} size="sm">
-            {connected ? "Manage" : "Connect"}
-          </Button>
-        </DialogTrigger>
+        <p className="truncate text-sm text-muted-foreground">{def.blurb}</p>
       </div>
-
-      <DialogContent className="max-w-[460px]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2.5 text-left">
-            <Icon className="size-5" aria-hidden />
-            Connect {def.name}
-          </DialogTitle>
-          {def.auto ? (
-            <DialogDescription>
-              Make your mutual {def.name} followers searchable
-            </DialogDescription>
-          ) : null}
-        </DialogHeader>
-
-        {def.oauth ? <OauthPanel def={def} rows={rows} /> : null}
-
-        {hasTabs ? (
-          <Tabs defaultValue="automatic">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="automatic">Automatic</TabsTrigger>
-              <TabsTrigger value="manual">Manual</TabsTrigger>
-            </TabsList>
-            <TabsContent value="automatic">
-              <AutoPanel def={def} rows={rows} />
-            </TabsContent>
-            <TabsContent value="manual">
-              <ManualPanel def={def} rows={rows} />
-            </TabsContent>
-          </Tabs>
-        ) : def.manual ? (
-          <ManualPanel def={def} rows={rows} />
-        ) : null}
-
-        {def.extension ? <ExtensionPanel def={def} rows={rows} /> : null}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── OAuth (Google, Outlook) ────────────────────────────────────────────────
-function OauthPanel({ def, rows }: { def: ConnectorDef; rows: Row[] }) {
-  const { Icon } = def;
-  const accounts = rows.filter((r) => r.method === "oauth");
-
-  // Real OAuth: hand off to the provider's consent screen. The callback
-  // (/api/connectors/<provider>/callback) records the connector and returns
-  // here. Needs the OAuth client id/secret env vars to be set.
-  const startUrl = `/api/connectors/${def.provider}`;
-
-  return (
-    <div className="flex flex-col gap-4">
-      <p className="text-sm leading-relaxed text-muted-foreground">
-        {def.oauth!.privacy}
-      </p>
-      <Button asChild className="gap-2">
-        <a href={startUrl}>
-          <Icon className="size-4" aria-hidden />
-          {def.oauth!.buttonLabel}
-        </a>
-      </Button>
-
-      {accounts.length > 0 ? (
-        <ul className="flex flex-col gap-2">
-          {accounts.map((a) => (
-            <RecordRow key={a._id} row={a} />
-          ))}
-        </ul>
-      ) : null}
-
-      {accounts.length > 0 ? (
-        <Button
-          asChild
-          variant="ghost"
-          size="sm"
-          className="justify-start gap-2 text-muted-foreground"
-        >
-          <a href={startUrl}>+ Add account</a>
-        </Button>
-      ) : null}
-    </div>
-  );
-}
-
-// ── Automatic transfer (Instagram via Fabric) ──────────────────────────────
-function AutoPanel({ def, rows }: { def: ConnectorDef; rows: Row[] }) {
-  const auto = def.auto!;
-  const recordUpload = useMutation(api.connectors.recordUpload);
-  const [busy, setBusy] = useState(false);
-  const existing = rows.find((r) => r.method === "auto");
-
-  async function connect() {
-    try {
-      setBusy(true);
-      // TODO: hand off to the partner's transfer flow; this records the link.
-      await recordUpload({
-        provider: def.provider,
-        method: "auto",
-        label: `${def.name} (via ${auto.partner})`,
-      });
-      toast.success(`${def.name} connected via ${auto.partner}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not connect");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card/40 p-4">
-      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <ZapIcon className="size-4 text-primary" aria-hidden />
-        {auto.partner}
-      </div>
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        {auto.partnerNote}
-      </p>
-
-      <ul className="flex flex-col gap-2.5">
-        {auto.scopes.map((s) => (
-          <li key={s.key} className="flex items-start gap-2.5">
-            <Checkbox
-              id={`scope-${def.provider}-${s.key}`}
-              defaultChecked
-              disabled={s.required}
-              className="mt-0.5"
-            />
-            <label
-              htmlFor={`scope-${def.provider}-${s.key}`}
-              className="cursor-pointer"
-            >
-              <span className="flex items-center gap-1.5 text-sm text-foreground">
-                {s.label}
-                {s.required ? (
-                  <Badge variant="primary" className="px-1.5 py-0 text-[10px]">
-                    Required
-                  </Badge>
-                ) : null}
-              </span>
-              <span className="block text-xs text-muted-foreground">{s.sub}</span>
-            </label>
-          </li>
-        ))}
-      </ul>
-
-      {existing ? (
-        <RecordRow row={existing} />
-      ) : (
-        <Button onClick={connect} disabled={busy} className="gap-2">
-          <ZapIcon className="size-4" aria-hidden />
-          {busy ? "Connecting…" : auto.buttonLabel}
-        </Button>
-      )}
-    </div>
-  );
-}
-
-// ── Manual export upload (LinkedIn, Twitter, Instagram) ─────────────────────
-function ManualPanel({ def, rows }: { def: ConnectorDef; rows: Row[] }) {
-  const manual = def.manual!;
-  const generateUploadUrl = useMutation(api.connectors.generateUploadUrl);
-  const recordUpload = useMutation(api.connectors.recordUpload);
-  const parseLinkedIn = useAction(api.linkedinImport.parseLinkedInExport);
-  const [showGuide, setShowGuide] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const existing = rows.find((r) => r.method === "manual");
-
-  async function onFile(file: File) {
-    try {
-      setBusy(true);
-      const url = await generateUploadUrl();
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-        body: file,
-      });
-      if (!res.ok) throw new Error("Upload failed");
-      const { storageId } = (await res.json()) as { storageId: Row["storageId"] };
-      await recordUpload({
-        provider: def.provider,
-        method: "manual",
-        label: `${def.name} data`,
-        fileName: file.name,
-        storageId,
-      });
-
-      // LinkedIn exports are parsed into the graph straight away; the rest just
-      // land in storage until their parser lands.
-      if (def.provider === "linkedin" && storageId) {
-        toast.success("Upload received, importing connections…");
-        const { imported, skipped } = await parseLinkedIn({ storageId });
-        toast.success(`Imported ${imported} connections (${skipped} already in graph)`);
-      } else {
-        toast.success(`${def.name} data uploaded`);
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Upload failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      {/* Step 1 — export from the provider */}
-      <button
-        type="button"
-        onClick={() => setShowGuide((s) => !s)}
-        aria-expanded={showGuide}
-        className="flex items-start gap-3 rounded-lg p-1 text-left transition-colors hover:text-foreground"
-      >
-        <FileTextIcon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-        <span>
-          <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-            Export your data
-            <ExternalLinkIcon className="size-3 text-muted-foreground" aria-hidden />
-          </span>
-          <span className="block text-xs text-muted-foreground">
-            Download your data from {def.name}
-          </span>
-        </span>
-      </button>
-
-      {showGuide ? (
-        <div className="flex flex-col gap-3 rounded-xl border border-border bg-card/40 p-4">
-          <ol className="flex flex-col gap-2.5">
-            {manual.guide.map((step, i) => (
-              <li key={i} className="flex gap-2.5 text-sm">
-                <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/15 text-[11px] font-semibold text-primary">
-                  {i + 1}
-                </span>
-                <span className="text-secondary-foreground">
-                  {step.text}
-                  {step.warn ? (
-                    <span className="mt-1 block text-xs text-[oklch(0.78_0.14_22)]">
-                      {step.warn}
-                    </span>
-                  ) : null}
-                </span>
-              </li>
-            ))}
-          </ol>
-          <Button asChild className="gap-2">
-            <a href={manual.exportUrl} target="_blank" rel="noopener noreferrer">
-              Continue to {def.name}
-              <ExternalLinkIcon className="size-4" aria-hidden />
-            </a>
-          </Button>
-        </div>
-      ) : null}
-
-      {/* Step 2 — upload the export */}
-      <div className="flex items-start gap-3 p-1">
-        <UploadIcon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-        <span>
-          <span className="block text-sm font-medium text-foreground">
-            Upload your file
-          </span>
-          <span className="block text-xs text-muted-foreground">
-            {manual.accept}
-          </span>
-        </span>
-      </div>
-
-      <Dropzone
-        accept={manual.acceptMime}
-        name={def.name}
-        busy={busy}
-        onFile={onFile}
-      />
-
-      {existing ? <RecordRow row={existing} /> : null}
     </div>
   );
 }
@@ -577,63 +261,6 @@ function RecordRow({ row }: { row: Row }) {
       >
         <Trash2Icon className="size-4" aria-hidden />
       </Button>
-    </div>
-  );
-}
-
-// ── Browser extension (LinkedIn mutuals from the user's own session) ────────
-function ExtensionPanel({ def, rows }: { def: ConnectorDef; rows: Row[] }) {
-  const ext = def.extension!;
-  const recordUpload = useMutation(api.connectors.recordUpload);
-  const [busy, setBusy] = useState(false);
-  const existing = rows.find((r) => r.method === "extension");
-
-  async function markInstalled() {
-    try {
-      setBusy(true);
-      await recordUpload({
-        provider: def.provider,
-        method: "extension",
-        label: "Chrome extension",
-      });
-      toast.success("Extension linked");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not link");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="text-sm leading-relaxed text-muted-foreground">{ext.intro}</p>
-
-      <Button asChild variant="outline" className="gap-2">
-        <a href={ext.downloadUrl} target="_blank" rel="noopener noreferrer">
-          <DownloadIcon className="size-4" aria-hidden />
-          Download the extension
-        </a>
-      </Button>
-
-      <ol className="flex flex-col gap-2.5 rounded-xl border border-border bg-card/40 p-4">
-        {ext.steps.map((step, i) => (
-          <li key={i} className="flex gap-2.5 text-sm">
-            <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/15 text-[11px] font-semibold text-primary">
-              {i + 1}
-            </span>
-            <span className="text-secondary-foreground">{step.text}</span>
-          </li>
-        ))}
-      </ol>
-
-      {existing ? (
-        <RecordRow row={existing} />
-      ) : (
-        <Button onClick={markInstalled} disabled={busy} className="gap-2">
-          <CheckIcon className="size-4" aria-hidden />
-          {busy ? "Linking…" : ext.buttonLabel}
-        </Button>
-      )}
     </div>
   );
 }
