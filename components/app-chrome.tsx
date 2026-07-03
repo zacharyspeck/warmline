@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { api } from "@/convex/_generated/api";
+import { SignupPrompt } from "@/components/signup-prompt";
 import {
   Link2Icon,
   SettingsIcon,
@@ -23,11 +25,24 @@ import { WarmlineLockup } from "@/components/warmline-mark";
 // App shell (S3): the dark velvet rail with iconed nav and the identity
 // block pinned to the footer. Full-screen routes (onboarding, sign in, the
 // public doc pages) render without it.
-export default function AppChrome({ children }: { children: React.ReactNode }) {
+//
+// `authed` is the SERVER's auth branch (the request cookie), so the nav is
+// stable from the first paint — it never flickers while api.auth.currentUser
+// resolves. The client query is only used for the footer identity block.
+export default function AppChrome({
+  authed,
+  children,
+}: {
+  authed: boolean;
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const me = useQuery(api.auth.currentUser);
   const { signOut } = useAuthActions();
+  // Signed-out shell: nav items open the same sign-up prompt the demo feed's
+  // vote buttons use, instead of navigating or bouncing off /signin.
+  const [signupOpen, setSignupOpen] = useState(false);
 
   if (
     pathname === "/onboarding" ||
@@ -50,24 +65,26 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
               icon={<ZapIcon />}
               label="Who to reach out to"
               active={pathname === "/"}
-              onClick={() => router.push("/")}
+              onClick={() =>
+                authed ? router.push("/") : setSignupOpen(true)
+              }
             />
-            {me ? (
-              <>
-                <SidebarItem
-                  icon={<Link2Icon />}
-                  label="Connectors"
-                  active={pathname === "/connectors"}
-                  onClick={() => router.push("/connectors")}
-                />
-                <SidebarItem
-                  icon={<TargetIcon />}
-                  label="Goals"
-                  active={pathname === "/onboarding"}
-                  onClick={() => router.push("/onboarding")}
-                />
-              </>
-            ) : null}
+            <SidebarItem
+              icon={<Link2Icon />}
+              label="Connectors"
+              active={pathname === "/connectors"}
+              onClick={() =>
+                authed ? router.push("/connectors") : setSignupOpen(true)
+              }
+            />
+            <SidebarItem
+              icon={<TargetIcon />}
+              label="Goals"
+              active={pathname === "/onboarding"}
+              onClick={() =>
+                authed ? router.push("/onboarding") : setSignupOpen(true)
+              }
+            />
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
@@ -119,6 +136,10 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
       </Sidebar>
 
       <div className="flex-1 overflow-y-auto">{children}</div>
+
+      {!authed && (
+        <SignupPrompt open={signupOpen} onOpenChange={setSignupOpen} />
+      )}
     </div>
   );
 }

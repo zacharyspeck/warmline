@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Schibsted_Grotesk } from "next/font/google";
-import { ConvexAuthNextjsServerProvider } from "@convex-dev/auth/nextjs/server";
+import {
+  ConvexAuthNextjsServerProvider,
+  isAuthenticatedNextjs,
+} from "@convex-dev/auth/nextjs/server";
 import "./globals.css";
 import ConvexClientProvider from "@/components/ConvexClientProvider";
 import AppChrome from "@/components/app-chrome";
@@ -32,11 +35,16 @@ export const metadata: Metadata = {
     "The For You feed for your warm network. Who to reach out to, why, and how",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // The server knows the auth branch from the request cookie — hand it to the
+  // chrome so nav renders stable on first paint instead of waiting on a client
+  // query. The server provider already reads the same cookies, so this adds no
+  // new rendering constraint.
+  const authed = await isAuthenticatedNextjs();
   // The server provider must wrap the tree so the client auth provider has a
   // defined auth state on both server and client render.
   return (
@@ -46,7 +54,7 @@ export default function RootLayout({
           className={`${geistSans.variable} ${geistMono.variable} ${schibsted.variable} font-sans antialiased min-h-screen bg-background text-foreground`}
         >
           <ConvexClientProvider>
-            <AppChrome>{children}</AppChrome>
+            <AppChrome authed={authed}>{children}</AppChrome>
           </ConvexClientProvider>
         </body>
       </html>

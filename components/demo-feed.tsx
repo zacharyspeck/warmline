@@ -3,20 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useConvexAuth, useQuery } from "convex/react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { FeedList } from "@/components/feed-list";
 import { WarmPath } from "@/components/warm-path";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { SignupPrompt } from "@/components/signup-prompt";
 
 // The read-only demo feed on the logged-out landing page. Subscribes ONLY to
 // the demo surface (api.demo.*), which the server scopes to the demo account —
@@ -62,25 +53,7 @@ export default function DemoFeed() {
         />
       )}
 
-      <Dialog open={signupOpen} onOpenChange={setSignupOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Make it your feed</DialogTitle>
-            <DialogDescription>
-              Thumbs teach Warmline who you actually want to meet. Create an
-              account to vote on your own network.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setSignupOpen(false)}>
-              Keep browsing
-            </Button>
-            <Button variant="primary" asChild>
-              <Link href="/signin">Sign up</Link>
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <SignupPrompt open={signupOpen} onOpenChange={setSignupOpen} />
     </>
   );
 }
