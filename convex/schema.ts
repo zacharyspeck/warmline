@@ -213,6 +213,16 @@ export default defineSchema({
     userId: v.id("users"),
     text: v.string(),
     vector: v.optional(v.array(v.number())), // OpenAI embedding
+    // Structured targets from the Goals editor. Optional so onboarding-derived
+    // icps (free-text only) stay valid. Folded into the embedded/judged text
+    // (see lib.goalEmbedText) so they steer ranking; text stays the header goal.
+    targets: v.optional(
+      v.object({
+        companies: v.array(v.string()),
+        roles: v.array(v.string()),
+        locations: v.array(v.string()),
+      }),
+    ),
     source: v.object({
       website: v.optional(v.string()),
       linkedin: v.optional(v.string()),

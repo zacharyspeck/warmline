@@ -80,9 +80,9 @@ export default function AppChrome({
             <SidebarItem
               icon={<TargetIcon />}
               label="Goals"
-              active={pathname === "/onboarding"}
+              active={pathname === "/goals"}
               onClick={() =>
-                authed ? router.push("/onboarding") : setSignupOpen(true)
+                authed ? router.push("/goals") : setSignupOpen(true)
               }
             />
           </SidebarGroup>

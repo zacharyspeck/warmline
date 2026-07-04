@@ -9,6 +9,7 @@ import {
   normCompany,
   nudgeVector,
   sanitizeCopy,
+  goalEmbedText,
 } from "./lib";
 
 test("cosine: identical vectors = 1, orthogonal = 0", () => {
@@ -110,4 +111,36 @@ test("nudgeVector: no votes returns a unit-normalized base (no drift)", () => {
   // direction preserved, magnitude normalized
   expect(cosine(out, base)).toBeCloseTo(1);
   expect(Math.hypot(...out)).toBeCloseTo(1);
+});
+
+test("goalEmbedText: no targets returns the bare statement", () => {
+  expect(goalEmbedText("Meet AI founders")).toBe("Meet AI founders");
+  expect(
+    goalEmbedText("Meet AI founders", {
+      companies: [],
+      roles: [],
+      locations: [],
+    }),
+  ).toBe("Meet AI founders");
+});
+
+test("goalEmbedText: folds structured targets into the embedded text", () => {
+  const out = goalEmbedText("Meet AI founders", {
+    companies: ["OpenAI", "Anthropic"],
+    roles: ["Founder", "VP Eng"],
+    locations: ["SF"],
+  });
+  expect(out).toContain("Meet AI founders");
+  expect(out).toContain("Target companies: OpenAI, Anthropic.");
+  expect(out).toContain("Target roles: Founder, VP Eng.");
+  expect(out).toContain("Locations: SF.");
+});
+
+test("goalEmbedText: trims and drops blank target entries", () => {
+  const out = goalEmbedText("Goal", {
+    companies: ["  Stripe ", ""],
+    roles: [],
+    locations: ["   "],
+  });
+  expect(out).toBe("Goal Target companies: Stripe.");
 });

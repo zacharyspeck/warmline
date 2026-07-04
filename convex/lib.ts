@@ -55,6 +55,31 @@ export function normCompany(c?: string): string | undefined {
   return t.length ? t : undefined;
 }
 
+// The text that actually gets embedded and handed to the judge for a goal:
+// the free-text statement plus any structured targets, appended as plain
+// sentences so they steer the vector. Pure so the composition is testable and
+// so both the embed path and the judge context stay identical. The bare
+// statement (icp.text) is what the feed header shows — this is ranking-only.
+export type GoalTargets = {
+  companies: string[];
+  roles: string[];
+  locations: string[];
+};
+
+export function goalEmbedText(text: string, targets?: GoalTargets): string {
+  if (!targets) return text;
+  const clean = (xs: string[]) =>
+    xs.map((s) => s.trim()).filter(Boolean);
+  const parts = [text.trim()];
+  const companies = clean(targets.companies);
+  const roles = clean(targets.roles);
+  const locations = clean(targets.locations);
+  if (companies.length) parts.push(`Target companies: ${companies.join(", ")}.`);
+  if (roles.length) parts.push(`Target roles: ${roles.join(", ")}.`);
+  if (locations.length) parts.push(`Locations: ${locations.join(", ")}.`);
+  return parts.filter(Boolean).join(" ");
+}
+
 // Enforce the product copy rules on one line of generated text: no em or en
 // dashes, and no period ending the final sentence (an ellipsis, ? or ! is kept).
 // A safety net over the judge prompt so the feed's why/how/opener always comply.

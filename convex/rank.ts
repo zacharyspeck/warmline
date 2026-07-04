@@ -16,6 +16,7 @@ import {
   feedScore,
   introScore,
   nudgeVector,
+  goalEmbedText,
 } from "./lib";
 
 const CANDIDATE_LIMIT = 120;
@@ -100,7 +101,9 @@ export const rankData = internalQuery({
     }
     return {
       owner,
-      icpText: icp.text,
+      // The Goals editor's structured targets steer the vector and the judge;
+      // the header still shows the bare statement (api.icp.latest.text).
+      icpText: goalEmbedText(icp.text, icp.targets),
       icpVector: icp.vector ?? null,
       leads,
     };

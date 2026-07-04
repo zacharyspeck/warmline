@@ -91,7 +91,7 @@ export default function HomeFeed() {
   }, [feed, demoted]);
 
   // The goal line under the title (S3): the real goal text, trimmed so the
-  // header stays one line, with the amber Edit goal link into the wizard.
+  // header stays one line, with the amber Edit goal link into the Goals editor.
   const goal =
     icp && icp.text.length > 72 ? `${icp.text.slice(0, 72)}…` : icp?.text;
 
@@ -108,7 +108,7 @@ export default function HomeFeed() {
             <>Ranked by warm path and goal fit, refreshed daily </>
           )}
           <Link
-            href="/onboarding"
+            href="/goals"
             className="font-medium text-primary underline-offset-4 hover:underline"
           >
             Edit goal

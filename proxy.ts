@@ -13,6 +13,7 @@ const isProtectedRoute = createRouteMatcher([
   "/server",
   "/onboarding",
   "/connectors",
+  "/goals",
   "/settings",
 ]);
 

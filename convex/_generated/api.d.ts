@@ -20,6 +20,7 @@ import type * as edges from "../edges.js";
 import type * as extension from "../extension.js";
 import type * as feed from "../feed.js";
 import type * as feedback from "../feedback.js";
+import type * as goals from "../goals.js";
 import type * as graph from "../graph.js";
 import type * as http from "../http.js";
 import type * as icp from "../icp.js";
@@ -56,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   extension: typeof extension;
   feed: typeof feed;
   feedback: typeof feedback;
+  goals: typeof goals;
   graph: typeof graph;
   http: typeof http;
   icp: typeof icp;

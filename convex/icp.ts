@@ -17,8 +17,16 @@ const sourceValidator = v.object({
   x: v.optional(v.string()),
 });
 
+const targetsValidator = v.object({
+  companies: v.array(v.string()),
+  roles: v.array(v.string()),
+  locations: v.array(v.string()),
+});
+
 // Onboarding: store the ICP text (derived from the product site) + the 3 links
-// + who the feed is for (individual vs company).
+// + who the feed is for (individual vs company). The Goals editor also writes
+// here with structured `targets`. icp is APPEND-ONLY: every save inserts a new
+// row and newest-wins, so editing a goal never patches in place.
 export const saveIcp = mutation({
   args: {
     text: v.string(),
@@ -26,6 +34,7 @@ export const saveIcp = mutation({
     audience: v.optional(
       v.union(v.literal("individual"), v.literal("company")),
     ),
+    targets: v.optional(targetsValidator),
   },
   returns: v.id("icp"),
   handler: async (ctx, args) => {
@@ -35,6 +44,7 @@ export const saveIcp = mutation({
       text: args.text,
       source: args.source,
       ...(args.audience ? { audience: args.audience } : {}),
+      ...(args.targets ? { targets: args.targets } : {}),
     });
   },
 });
@@ -109,10 +119,43 @@ export const latestForUser = internalQuery({
   },
 });
 
+// The newest icp's carry-over fields for a goal edit: the Goals editor changes
+// text + targets but must not lose the source links or audience the goal was
+// created with. Owner-scoped.
+export const latestForEdit = internalQuery({
+  args: { userId: v.id("users") },
+  returns: v.union(
+    v.object({
+      source: sourceValidator,
+      audience: v.optional(
+        v.union(v.literal("individual"), v.literal("company")),
+      ),
+    }),
+    v.null(),
+  ),
+  handler: async (ctx, args) => {
+    const icp = await ctx.db
+      .query("icp")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .order("desc")
+      .first();
+    if (!icp) return null;
+    return {
+      source: icp.source,
+      ...(icp.audience ? { audience: icp.audience } : {}),
+    };
+  },
+});
+
 export const latest = query({
   args: {},
   returns: v.union(
-    v.object({ _id: v.id("icp"), text: v.string(), hasVector: v.boolean() }),
+    v.object({
+      _id: v.id("icp"),
+      text: v.string(),
+      hasVector: v.boolean(),
+      targets: v.optional(targetsValidator),
+    }),
     v.null(),
   ),
   handler: async (ctx) => {
@@ -124,6 +167,11 @@ export const latest = query({
       .order("desc")
       .first();
     if (!icp) return null;
-    return { _id: icp._id, text: icp.text, hasVector: !!icp.vector };
+    return {
+      _id: icp._id,
+      text: icp.text,
+      hasVector: !!icp.vector,
+      ...(icp.targets ? { targets: icp.targets } : {}),
+    };
   },
 });
