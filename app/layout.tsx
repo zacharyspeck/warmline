@@ -12,16 +12,20 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
+// Monospace is only used in rare kbd chips, never above the fold — don't
+// preload it (it still self-hosts and swaps in when a mono glyph renders).
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+  preload: false,
 });
 
-// Display / wordmark face. Brand spec: Schibsted Grotesk 600.
+// Display / wordmark face. Brand spec: Schibsted Grotesk 600 — the only weight
+// the UI actually uses, so we ship just that one file (was 500/600/700).
 const schibsted = Schibsted_Grotesk({
   variable: "--font-schibsted",
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  weight: ["600"],
 });
 
 export const metadata: Metadata = {
