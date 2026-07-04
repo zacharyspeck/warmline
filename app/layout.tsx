@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Schibsted_Grotesk } from "next/font/google";
 import {
   ConvexAuthNextjsServerProvider,
-  isAuthenticatedNextjs,
+  convexAuthNextjsToken,
 } from "@convex-dev/auth/nextjs/server";
 import "./globals.css";
 import ConvexClientProvider from "@/components/ConvexClientProvider";
@@ -42,9 +42,11 @@ export default async function RootLayout({
 }>) {
   // The server knows the auth branch from the request cookie — hand it to the
   // chrome so nav renders stable on first paint instead of waiting on a client
-  // query. The server provider already reads the same cookies, so this adds no
-  // new rendering constraint.
-  const authed = await isAuthenticatedNextjs();
+  // query. Token PRESENCE is deliberate (isAuthenticatedNextjs would validate
+  // against the Convex backend on every request for every route, and a blip
+  // there would hand a signed-in user the signed-out rail); an expired token
+  // just means a nav click lands on the middleware's real check.
+  const authed = (await convexAuthNextjsToken()) !== undefined;
   // The server provider must wrap the tree so the client auth provider has a
   // defined auth state on both server and client render.
   return (
