@@ -52,6 +52,24 @@ test("voting again for the same (icp, person) replaces — one row, new value", 
   expect(rows[0].vote).toBe("down");
 });
 
+// Task S1.4: the vote wheel commits on click, so each click must be the
+// committed state with no deferral. A rapid up → down → up sequence must end
+// as exactly one 'up' row and forIcp must reflect the last click immediately.
+test("each click is the committed state: up→down→up ends up, one row", async () => {
+  const t = convexTest(schema, modules);
+  const { icpId, personId, as } = await seed(t);
+
+  await as.mutation(api.feedback.vote, { icpId, personId, vote: "up" });
+  await as.mutation(api.feedback.vote, { icpId, personId, vote: "down" });
+  await as.mutation(api.feedback.vote, { icpId, personId, vote: "up" });
+
+  // Immediately visible — no animation gate, no second confirmation.
+  const votes = await as.query(api.feedback.forIcp, { icpId });
+  expect(votes).toEqual([{ personId, vote: "up" }]);
+  const rows = await t.run(async (ctx) => ctx.db.query("feedback").collect());
+  expect(rows.length).toBe(1);
+});
+
 test("forIcp returns the votes for the icp", async () => {
   const t = convexTest(schema, modules);
   const { icpId, personId, as } = await seed(t);
