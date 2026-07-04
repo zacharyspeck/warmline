@@ -33,6 +33,7 @@ import type * as myFunctions from "../myFunctions.js";
 import type * as onboard from "../onboard.js";
 import type * as openai from "../openai.js";
 import type * as rank from "../rank.js";
+import type * as rateLimit from "../rateLimit.js";
 import type * as resolve from "../resolve.js";
 import type * as seedDemo from "../seedDemo.js";
 import type * as upgrade from "../upgrade.js";
@@ -70,6 +71,7 @@ declare const fullApi: ApiFromModules<{
   onboard: typeof onboard;
   openai: typeof openai;
   rank: typeof rank;
+  rateLimit: typeof rateLimit;
   resolve: typeof resolve;
   seedDemo: typeof seedDemo;
   upgrade: typeof upgrade;

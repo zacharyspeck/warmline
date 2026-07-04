@@ -67,6 +67,16 @@ export default defineSchema({
     scrape: v.number(),
   }).index("by_day", ["day"]),
 
+  // Server-side rate limiting for signup / invite-code attempts, keyed by a
+  // normalized identifier (the lowercased email). A fixed window per
+  // identifier; see convex/rateLimit.ts. Not user-owned (the account may not
+  // exist yet), so it is not part of delete-my-data.
+  signupAttempts: defineTable({
+    identifier: v.string(),
+    windowStart: v.number(),
+    count: v.number(),
+  }).index("by_identifier", ["identifier"]),
+
   // Pricing-page "Request access" rows (no payment processing; the owner
   // follows up by hand). One row per user per plan; purged by delete-my-data
   // like every user-owned table.

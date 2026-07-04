@@ -1,10 +1,12 @@
 "use client";
 
 import { useAuthActions } from "@convex-dev/auth/react";
+import { useMutation } from "convex/react";
 import { ConvexError } from "convex/values";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +21,7 @@ import { WarmlineLockup } from "@/components/warmline-mark";
 //   • the invite-code field stays on Create account — signup is gated
 export default function SignIn() {
   const { signIn } = useAuthActions();
+  const recordSignupAttempt = useMutation(api.rateLimit.recordSignupAttempt);
   const [flow, setFlow] = useState<"signIn" | "signUp">("signIn");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -50,13 +53,22 @@ export default function SignIn() {
               setError(null);
               const formData = new FormData(e.target as HTMLFormElement);
               formData.set("flow", flow);
-              void signIn("password", formData)
+              // Server-side signup rate limit (per email, fixed window) runs
+              // before the account flow; on the sign-in flow it's a no-op.
+              const gate =
+                flow === "signUp"
+                  ? recordSignupAttempt({
+                      identifier: String(formData.get("email") ?? ""),
+                    })
+                  : Promise.resolve(null);
+              void gate
+                .then(() => signIn("password", formData))
                 .then(() => {
                   router.push(flow === "signUp" ? "/onboarding" : "/");
                 })
                 .catch((error) => {
                   // ConvexError data survives prod redaction (e.g. the invite
-                  // gate's message); anything else falls back to error.message.
+                  // gate's or rate limit's message); else fall back to message.
                   setError(
                     error instanceof ConvexError &&
                       typeof error.data === "string"

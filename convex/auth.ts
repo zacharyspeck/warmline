@@ -15,7 +15,10 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
     Password<DataModel>({
       // Runs INSIDE the auth:signIn action for every password flow, before any
       // account is created — so the invite gate holds even when the client is
-      // bypassed and the backend is called directly.
+      // bypassed and the backend is called directly. This callback is consumed
+      // synchronously by the Password provider, so it cannot touch the DB; the
+      // signup rate limit lives in the DB-backed api.rateLimit.recordSignupAttempt,
+      // enforced by the sign-up page before this runs.
       profile(params) {
         const email = typeof params.email === "string" ? params.email : "";
         if (params.flow === "signUp") {
