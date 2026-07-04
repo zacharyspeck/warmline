@@ -175,14 +175,31 @@ export async function feedForUser(
     .first();
   const pre: Pre[] = [];
 
+  // Zero leads (a connectors-only network, e.g. a fresh LinkedIn import):
+  // the unlockValue gate would empty the feed forever, since unlock values
+  // only exist where connectors bridge to leads. Sampled with isSelf excluded
+  // because the self row is stored as a connector.
+  const leadSample = await ctx.db
+    .query("persons")
+    .withIndex("by_user_and_role", (q) =>
+      q.eq("userId", userId).eq("role", "lead"),
+    )
+    .take(5);
+  const hasLeads = leadSample.some((p) => !p.isSelf);
+
   // Lead rows: prefer ranked recommendations; else a reachability heuristic.
-  const recs = icp
+  // Once the user HAS leads, connector-kind recommendations (a zero-lead
+  // era's ranking, wiped by the next rank pass) are ignored here — otherwise
+  // stale connector recs would keep newly added leads out of the feed until
+  // the next cron.
+  const allRecs = icp
     ? await ctx.db
         .query("recommendations")
         .withIndex("by_icp_and_score", (q) => q.eq("icpId", icp._id))
         .order("desc")
         .take(limit * 2)
     : [];
+  const recs = hasLeads ? allRecs.filter((r) => r.kind === "lead") : allRecs;
   if (recs.length > 0) {
     for (const r of recs) {
       const p = await ctx.db.get(r.personId);
@@ -211,18 +228,6 @@ export async function feedForUser(
       pre.push({ p, score: h.score, why: h.why, how: heuristicHow(p) });
     }
   }
-
-  // Zero leads (a connectors-only network, e.g. a fresh LinkedIn import):
-  // the unlockValue gate would empty the feed forever, since unlock values
-  // only exist where connectors bridge to leads. Sampled with isSelf excluded
-  // because the self row is stored as a connector.
-  const leadSample = await ctx.db
-    .query("persons")
-    .withIndex("by_user_and_role", (q) =>
-      q.eq("userId", userId).eq("role", "lead"),
-    )
-    .take(5);
-  const hasLeads = leadSample.some((p) => !p.isSelf);
 
   // Connector rows ALWAYS appear (the "befriend a connector" mode). Top by
   // unlockValue — except with zero leads, where nobody has an unlockValue:

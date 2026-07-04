@@ -258,6 +258,18 @@ export const replaceConnectorRecs = internalMutation({
       for (const r of batch) await ctx.db.delete(r._id);
       if (batch.length < 500) break;
     }
+    // Re-check zero-leads INSIDE the transaction: the rank action decided on
+    // a snapshot that can be minutes old (pagination + embeds), and leads
+    // gained meanwhile must not end up drowned under connector recs.
+    if (args.recs.length > 0) {
+      const leadSample = await ctx.db
+        .query("persons")
+        .withIndex("by_user_and_role", (q) =>
+          q.eq("userId", icp.userId).eq("role", "lead"),
+        )
+        .take(5);
+      if (leadSample.some((p) => !p.isSelf)) return null;
+    }
     for (const rec of args.recs) {
       const person = await ctx.db.get(rec.personId);
       if (
