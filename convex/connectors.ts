@@ -41,36 +41,6 @@ export const generateUploadUrl = mutation({
   },
 });
 
-// Link an OAuth provider (Google, Outlook). One row per account, so a
-// provider can hold several accounts. Re-linking the same email is a no-op.
-export const connectOauth = mutation({
-  args: {
-    provider: connectorProvider,
-    accountEmail: v.string(),
-    label: v.string(),
-  },
-  returns: v.id("connectors"),
-  handler: async (ctx, args) => {
-    const userId = await requireUser(ctx);
-    const existing = await ctx.db
-      .query("connectors")
-      .withIndex("by_user_provider", (q) =>
-        q.eq("userId", userId).eq("provider", args.provider),
-      )
-      .collect();
-    const match = existing.find((c) => c.accountEmail === args.accountEmail);
-    if (match) return match._id;
-    return await ctx.db.insert("connectors", {
-      userId,
-      provider: args.provider,
-      method: "oauth",
-      status: "active",
-      label: args.label,
-      accountEmail: args.accountEmail,
-    });
-  },
-});
-
 // Record a manual / automatic data export. One source per provider, so a new
 // upload replaces the previous one for that provider.
 export const recordUpload = mutation({
