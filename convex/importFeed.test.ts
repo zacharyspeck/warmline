@@ -2,7 +2,7 @@
 import { convexTest } from "convex-test";
 import { expect, test, vi } from "vitest";
 import { zipSync, strToU8 } from "fflate";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import schema from "./schema";
 import { dayKey, TIER_LIMITS } from "./limits";
 
@@ -148,16 +148,19 @@ test("capped import still yields feed rows via tieStrength ordering", async () =
   const t = convexTest(schema, modules);
   const { userId, as } = await newUser(t, "import-capped@example.com");
 
+  // A REAL-looking key, so any attempted OpenAI call reaches the counting
+  // fetch stub instead of dying earlier in apiKey() — otherwise
+  // networkCalls === 0 would hold even with the reserve gate deleted.
   let networkCalls = 0;
-  vi.stubEnv("OPENAI_API_KEY", "");
+  vi.stubEnv("OPENAI_API_KEY", "test-key");
   vi.stubGlobal("fetch", async () => {
     networkCalls++;
     throw new Error("no network calls allowed when capped");
   });
   vi.useFakeTimers();
   try {
-    await t.run(async (ctx) => {
-      await ctx.db.insert("icp", {
+    const icpId = await t.run(async (ctx) => {
+      const icpId = await ctx.db.insert("icp", {
         userId,
         text: "Meet AI infra founders",
         source: {},
@@ -170,6 +173,7 @@ test("capped import still yields feed rows via tieStrength ordering", async () =
         embed: TIER_LIMITS.free.embed,
         scrape: 0,
       });
+      return icpId;
     });
     const storageId = await t.run(async (ctx) =>
       ctx.storage.store(
@@ -200,31 +204,48 @@ test("capped import still yields feed rows via tieStrength ordering", async () =
     });
     expect(res).toEqual({ imported: 3, skipped: 0 });
     await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+    // afterImport swallows rank errors by design, so prove the capped rank
+    // DEGRADES (returns) rather than throws by running it directly, and that
+    // it reports exactly the skipped work: the icp embed + 3 person embeds.
+    const out = await t.action(internal.rank.rebuild, { icpId });
+    expect(out).toEqual({
+      scored: 0,
+      judged: 0,
+      judgeDegraded: 0,
+      embedsSkipped: 4,
+    });
   } finally {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   }
 
-  // Fully capped: the rank pass degraded without a single OpenAI call and
-  // wrote no recommendations.
+  // Fully capped: not a single OpenAI call was attempted, no recommendations
+  // were written, and the usage counters did not move past the cap.
   expect(networkCalls).toBe(0);
   const recCount = await t.run(async (ctx) =>
     (await ctx.db.query("recommendations").collect()).length,
   );
   expect(recCount).toBe(0);
+  const embedUsed = await t.run(async (ctx) => {
+    const rows = await ctx.db.query("usage").collect();
+    return rows.reduce((sum, r) => sum + r.embed, 0);
+  });
+  expect(embedUsed).toBe(TIER_LIMITS.free.embed);
 
   // Tie strengths arrive later (e.g. messages.csv ingest) — the degraded
-  // feed must order by them.
+  // feed must order by them. Assigned OUT of insertion order so a stable
+  // sort on equal scores can't pass this vacuously.
   await t.run(async (ctx) => {
     const persons = await ctx.db
       .query("persons")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .collect();
     const tie: Record<string, number> = {
-      "Han Wang": 0.9,
-      "Mia Reyes": 0.5,
-      "Zed Klein": 0.1,
+      "Han Wang": 0.1,
+      "Mia Reyes": 0.9,
+      "Zed Klein": 0.5,
     };
     for (const p of persons) {
       await ctx.db.patch(p._id, { tieStrength: tie[p.name] });
@@ -232,15 +253,16 @@ test("capped import still yields feed rows via tieStrength ordering", async () =
   });
 
   const rows = await as.query(api.feed.list, {});
-  expect(rows.map((r) => r.name)).toEqual(["Han Wang", "Mia Reyes", "Zed Klein"]);
+  expect(rows.map((r) => r.name)).toEqual(["Mia Reyes", "Zed Klein", "Han Wang"]);
   const scores = rows.map((r) => r.score);
-  expect(scores).toEqual([...scores].sort((a, b) => b - a));
+  expect(scores[0]).toBeGreaterThan(scores[1]);
+  expect(scores[1]).toBeGreaterThan(scores[2]);
 });
 
 test("re-import embeds nothing that is already cached", async () => {
   const t = convexTest(schema, modules);
   const { userId, as } = await newUser(t, "import-cache@example.com");
-  await t.run(async (ctx) =>
+  const icpId = await t.run(async (ctx) =>
     ctx.db.insert("icp", {
       userId,
       text: "Meet AI infra founders",
@@ -292,6 +314,19 @@ test("re-import embeds nothing that is already cached", async () => {
     await t.finishAllScheduledFunctions(vi.runAllTimers);
     // …and the re-ranked pass embeds NOTHING: ICP vector and person vectors
     // are all cached.
+    expect(embedInputs.length).toBe(0);
+
+    // afterImport swallows rank errors, so embedInputs === 0 alone can't
+    // distinguish "cached" from "the second pass crashed before embedding".
+    // Run the rank directly: it must COMPLETE, score both people from cache,
+    // and still embed nothing.
+    const out = await t.action(internal.rank.rebuild, { icpId });
+    expect(out).toEqual({
+      scored: 2,
+      judged: 0,
+      judgeDegraded: 0,
+      embedsSkipped: 0,
+    });
     expect(embedInputs.length).toBe(0);
   } finally {
     vi.useRealTimers();
