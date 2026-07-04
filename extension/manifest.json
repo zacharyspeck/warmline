@@ -1,22 +1,19 @@
 {
   "manifest_version": 3,
-  "name": "Warmline — LinkedIn Mutuals",
-  "version": "0.1.0",
-  "description": "Reads the mutual connections shown on a LinkedIn profile (the connectors on a Lead's warm path) and sends them to Warmline.",
+  "name": "Warmline — Capture LinkedIn profiles",
+  "version": "0.2.0",
+  "description": "Capture a LinkedIn profile you are viewing and its mutual connections into your Warmline graph, on a click.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "permissions": ["storage", "alarms", "tabs"],
+  "permissions": ["storage", "activeTab"],
   "host_permissions": [
     "https://www.linkedin.com/*",
     "https://*.convex.site/*"
   ],
-  "background": {
-    "service_worker": "background.js"
-  },
   "content_scripts": [
     {
       "matches": ["https://www.linkedin.com/in/*"],

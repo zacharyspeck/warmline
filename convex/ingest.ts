@@ -192,6 +192,33 @@ async function upsertEvent(
   return await ctx.db.insert("events", { userId, name, date });
 }
 
+// The ingestLeads overlap rule as a shared helper: a person the caller already
+// knows (matched by slug) is PROMOTED to a lead in place (keeping their
+// relationship), never duplicated; the self row is never reclassified; a new
+// person is inserted as a not-connected lead. Reused by the extension capture.
+export async function promoteOrInsertLead(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  row: { name: string; linkedinUrl?: string; xHandle?: string },
+): Promise<Id<"persons">> {
+  const existing = await findPerson(ctx, userId, row.linkedinUrl, row.xHandle);
+  if (existing) {
+    if (!existing.isSelf && existing.role !== "lead") {
+      await ctx.db.patch(existing._id, { role: "lead" });
+    }
+    return existing._id;
+  }
+  return await ctx.db.insert("persons", {
+    userId,
+    name: row.name,
+    linkedinUrl: row.linkedinUrl,
+    xHandle: row.xHandle,
+    isSelf: false,
+    role: "lead",
+    relationshipToYou: "not_connected",
+  });
+}
+
 // Config Leads rows → role lead. If already a connection, keep connected + promote to lead.
 export const ingestLeads = mutation({
   args: { rows: v.array(leadRow) },
@@ -201,28 +228,11 @@ export const ingestLeads = mutation({
     let leads = 0;
     let attendances = 0;
     for (const row of args.rows) {
-      const existing = await findPerson(
-        ctx,
-        userId,
-        row.linkedinUrl,
-        row.xHandle,
-      );
-      let personId: Id<"persons">;
-      if (existing) {
-        // A lead you already know (the verified overlaps). Promote to lead, keep connected.
-        await ctx.db.patch(existing._id, { role: "lead" });
-        personId = existing._id;
-      } else {
-        personId = await ctx.db.insert("persons", {
-          userId,
-          name: row.name,
-          linkedinUrl: row.linkedinUrl,
-          xHandle: row.xHandle,
-          isSelf: false,
-          role: "lead",
-          relationshipToYou: "not_connected",
-        });
-      }
+      const personId: Id<"persons"> = await promoteOrInsertLead(ctx, userId, {
+        name: row.name,
+        linkedinUrl: row.linkedinUrl,
+        xHandle: row.xHandle,
+      });
       leads++;
 
       if (row.eventName) {

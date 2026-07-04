@@ -26,13 +26,20 @@ export const SIGNUP_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 export const RATE_LIMIT_ERROR =
   "Too many attempts. Please wait a few minutes and try again";
 
-// Record one attempt for `identifier`; throw once the window's cap is hit.
-// Fixed window: the first attempt opens a window, and the window resets once
-// SIGNUP_WINDOW_MS has elapsed since it opened. Pure ctx helper so it is
-// unit-testable and reusable.
-export async function enforceSignupRateLimit(
+// Per-user extension capture limit (task: revive the extension). Generous for
+// a human clicking Capture on profiles, tight enough that a leaked token can't
+// hammer the graph. Keyed by `ext:<userId>` in the same table.
+export const CAPTURE_MAX_PER_WINDOW = 60;
+export const CAPTURE_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+
+// The generic fixed-window limiter over the signupAttempts table. The first
+// attempt opens a window; it resets once windowMs has elapsed since it opened.
+// Pure ctx helper so it is unit-testable and reusable across throttles.
+export async function enforceRateLimit(
   ctx: MutationCtx,
   identifier: string,
+  max: number,
+  windowMs: number,
 ): Promise<void> {
   const id = identifier.trim().toLowerCase() || "unknown";
   const now = Date.now();
@@ -48,16 +55,42 @@ export async function enforceSignupRateLimit(
     });
     return;
   }
-  if (now - existing.windowStart > SIGNUP_WINDOW_MS) {
+  if (now - existing.windowStart > windowMs) {
     // The window elapsed → start a fresh one.
     await ctx.db.patch(existing._id, { windowStart: now, count: 1 });
     return;
   }
-  if (existing.count >= SIGNUP_MAX_ATTEMPTS) {
+  if (existing.count >= max) {
     // ConvexError so the message survives prod redaction (like the invite gate).
     throw new ConvexError(RATE_LIMIT_ERROR);
   }
   await ctx.db.patch(existing._id, { count: existing.count + 1 });
+}
+
+// Record one signup attempt for `identifier`; throw once the window's cap is hit.
+export async function enforceSignupRateLimit(
+  ctx: MutationCtx,
+  identifier: string,
+): Promise<void> {
+  await enforceRateLimit(
+    ctx,
+    identifier,
+    SIGNUP_MAX_ATTEMPTS,
+    SIGNUP_WINDOW_MS,
+  );
+}
+
+// Record one extension capture for `userId`; throw once the window's cap is hit.
+export async function enforceCaptureRateLimit(
+  ctx: MutationCtx,
+  userId: string,
+): Promise<void> {
+  await enforceRateLimit(
+    ctx,
+    `ext:${userId}`,
+    CAPTURE_MAX_PER_WINDOW,
+    CAPTURE_WINDOW_MS,
+  );
 }
 
 // The sign-up page calls this before signIn("password", { flow: "signUp" }).

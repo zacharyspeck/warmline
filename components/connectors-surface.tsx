@@ -6,7 +6,13 @@ import { format } from "date-fns";
 import { Toaster, toast } from "sonner";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
-import { CheckIcon, Trash2Icon, UploadIcon } from "@/components/icons";
+import Link from "next/link";
+import {
+  CheckIcon,
+  DownloadIcon,
+  Trash2Icon,
+  UploadIcon,
+} from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -38,13 +44,17 @@ export function ConnectorsSurface() {
       />
 
       <section className="mt-3 flex flex-col gap-2.5">
-        {CONNECTORS.filter((def) => def.provider !== "linkedin").map((def) => (
-          <ComingSoonRow
-            key={def.provider}
-            def={def}
-            rows={(rows ?? []).filter((r) => r.provider === def.provider)}
-          />
-        ))}
+        {CONNECTORS.filter((def) => def.provider !== "linkedin").map((def) =>
+          def.provider === "extension" ? (
+            <ExtensionRow key={def.provider} def={def} />
+          ) : (
+            <ComingSoonRow
+              key={def.provider}
+              def={def}
+              rows={(rows ?? []).filter((r) => r.provider === def.provider)}
+            />
+          ),
+        )}
       </section>
     </div>
   );
@@ -168,6 +178,50 @@ function ComingSoonRow({ def, rows }: { def: ConnectorDef; rows: Row[] }) {
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+// ── The browser extension: a real, working install now (task: revive it) ─────
+function ExtensionRow({ def }: { def: ConnectorDef }) {
+  const { Icon } = def;
+  const ext = def.extension!;
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 [box-shadow:var(--shadow-s)]">
+      <div className="flex items-center gap-4">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg [background-image:var(--velour-raised)] [box-shadow:var(--shadow-button)]">
+          <Icon className="size-5" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <span className="font-medium">{def.name}</span>
+          <p className="truncate text-sm text-muted-foreground">{ext.intro}</p>
+        </div>
+        <Button asChild variant="primary" size="sm" className="gap-1.5">
+          <a href="/api/extension/download" download>
+            <DownloadIcon className="size-3.5" aria-hidden />
+            Download
+          </a>
+        </Button>
+      </div>
+      <ol className="mt-3 flex flex-col gap-1.5 rounded-lg border border-border bg-background/40 p-3 text-sm text-muted-foreground">
+        <li>1. Download the zip above and unzip it</li>
+        <li>2. Open chrome://extensions, enable Developer mode</li>
+        <li>3. Click Load unpacked and pick the unzipped folder</li>
+        <li>
+          4. Generate a token in{" "}
+          <Link
+            href="/settings"
+            className="font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Settings
+          </Link>{" "}
+          and paste it plus the server URL into the extension
+        </li>
+        <li>
+          5. On a LinkedIn profile you are viewing, click Capture in the
+          extension
+        </li>
+      </ol>
     </div>
   );
 }

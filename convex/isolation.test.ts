@@ -271,7 +271,7 @@ test("denied: direct cross-user id lookups on every surface, and signed-out call
   ).rejects.toThrow(/Not authenticated/);
 });
 
-test("extension HTTP routes: only a signed-in user reaches them; the retired demo token grants nothing", async () => {
+test("extension capture route: rejects anonymous and bogus-token callers; no demo write path", async () => {
   const t = convexTest(schema, modules);
   const A = await buildWorld(t, "alice@example.com", 0);
   const B = await buildWorld(t, "bob@example.com", 500);
@@ -307,50 +307,58 @@ test("extension HTTP routes: only a signed-in user reaches them; the retired dem
     });
   const before = await snapshot();
 
-  // Anonymous: rejected outright on both routes, and the rejected calls must
+  // Anonymous (no Bearer token): rejected outright, and the rejected call must
   // not even create the demo user.
-  const anonLeads = await t.fetch("/extension/leads", { method: "GET" });
-  expect(anonLeads.status).toBe(401);
-  const anonPost = await t.fetch("/extension/mutuals", {
+  const anonPost = await t.fetch("/extension/capture", {
     ...collidePost,
     headers: { "Content-Type": "application/json" },
   });
   expect(anonPost.status).toBe(401);
 
-  // The RETIRED shared token grants nothing anymore, even when it is set on
-  // the deploy AND the bearer matches: demo content changes only through the
-  // daily cron and the internal admin loaders.
-  vi.stubEnv("WARMLINE_EXTENSION_TOKEN", "secret");
-  try {
-    const tokenLeads = await t.fetch("/extension/leads", {
-      method: "GET",
-      headers: { Authorization: "Bearer secret" },
-    });
-    expect(tokenLeads.status).toBe(401);
-    const tokenPost = await t.fetch("/extension/mutuals", {
-      ...collidePost,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer secret",
-      },
-    });
-    expect(tokenPost.status).toBe(401);
-  } finally {
-    vi.unstubAllEnvs();
-  }
+  // A bogus/unknown token grants nothing: the token must hash to a real
+  // extensionTokens row, and even then it stamps the TOKEN's owner, never an
+  // attacker-chosen graph. So a made-up bearer trying to write into A's graph
+  // is rejected.
+  const bogus = await t.fetch("/extension/capture", {
+    ...collidePost,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer wl_not_a_real_token",
+    },
+  });
+  expect(bogus.status).toBe(401);
 
   // Nothing about the world changed: no demo user, A's graph untouched.
   expect(await snapshot()).toEqual({ ...before, demoExists: false });
 
-  // A SIGNED-IN user's request works and lands in their OWN graph: the new
-  // mutual and edge belong to A, the crawled lead is stamped on A's row, and
-  // still no demo account exists.
-  const postRes = await A.as.fetch("/extension/mutuals", {
+  // A's OWN token works and stamps A's graph: the capture always lands in the
+  // TOKEN owner's graph, so the new mutual and edge belong to A, no demo
+  // account is created, and B's graph is untouched.
+  const bBefore = await t.run(async (ctx) => {
+    const persons = await ctx.db
+      .query("persons")
+      .withIndex("by_user", (q) => q.eq("userId", B.userId))
+      .collect();
+    const edges = await ctx.db
+      .query("edges")
+      .withIndex("by_user", (q) => q.eq("userId", B.userId))
+      .collect();
+    return { personCount: persons.length, edgeCount: edges.length };
+  });
+
+  const { token } = await A.as.action(api.extensionAuth.generateToken, {});
+  const postRes = await t.fetch("/extension/capture", {
     ...collidePost,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
   });
   expect(postRes.status).toBe(200);
-  expect(await postRes.json()).toEqual({ edges: 1 });
+  expect(await postRes.json()).toEqual({
+    edges: 1,
+    leadSlug: aLead.linkedinUrl,
+  });
   await t.run(async (ctx) => {
     const demo = await ctx.db
       .query("users")
@@ -371,27 +379,20 @@ test("extension HTTP routes: only a signed-in user reaches them; the retired dem
       .withIndex("by_user", (q) => q.eq("userId", A.userId))
       .collect();
     expect(aEdges.length).toBe(before.aEdgeCount + 1);
+
+    // B's graph is untouched: A's token can never write into another user.
+    const bPersons = await ctx.db
+      .query("persons")
+      .withIndex("by_user", (q) => q.eq("userId", B.userId))
+      .collect();
+    const bEdges = await ctx.db
+      .query("edges")
+      .withIndex("by_user", (q) => q.eq("userId", B.userId))
+      .collect();
+    expect(bPersons.length).toBe(bBefore.personCount);
+    expect(bEdges.length).toBe(bBefore.edgeCount);
+    expect(bPersons.some((p) => p.linkedinUrl === "mutual-one")).toBe(false);
   });
-
-  // The signed-in pending-leads crawl serves ONLY the caller's graph. Both
-  // worlds are seeded with IDENTICAL slug strings by design, so the pin is
-  // row-level: the slug A just crawled disappears from A's pending list while
-  // the same slug string stays pending for B, whose row A's stamp never
-  // touched.
-  const pendingA = await A.as.fetch("/extension/leads", { method: "GET" });
-  expect(pendingA.status).toBe(200);
-  const leadsA = ((await pendingA.json()) as {
-    leads: { slug: string; name: string }[];
-  }).leads;
-  expect(leadsA.length).toBeGreaterThan(0);
-  expect(leadsA.some((l) => l.slug === aLead.linkedinUrl)).toBe(false);
-
-  const pendingB = await B.as.fetch("/extension/leads", { method: "GET" });
-  expect(pendingB.status).toBe(200);
-  const leadsB = ((await pendingB.json()) as {
-    leads: { slug: string; name: string }[];
-  }).leads;
-  expect(leadsB.some((l) => l.slug === aLead.linkedinUrl)).toBe(true);
 });
 
 test("icp.embedIcp: only the authenticated owner reaches the embed; anyone else is denied before any OpenAI call", async () => {

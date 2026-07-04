@@ -81,6 +81,18 @@ export default defineSchema({
     // stays bounded and no normalized email lingers past its window.
     .index("by_windowStart", ["windowStart"]),
 
+  // Scoped access tokens for the browser extension. A signed-in user mints one
+  // from Settings; only the SHA-256 hash is stored, never the raw token. The
+  // extension sends the raw token; the server hashes it, resolves the userId,
+  // and stamps every capture with that user. One live token per user (minting
+  // replaces the prior one). Purged for a user by delete-my-data.
+  extensionTokens: defineTable({
+    userId: v.id("users"),
+    tokenHash: v.string(),
+  })
+    .index("by_tokenHash", ["tokenHash"])
+    .index("by_user", ["userId"]),
+
   // Pricing-page "Request access" rows (no payment processing; the owner
   // follows up by hand). One row per user per plan; purged by delete-my-data
   // like every user-owned table.

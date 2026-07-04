@@ -146,6 +146,7 @@ async function purgePass(
     | "events"
     | "usage"
     | "upgradeRequests"
+    | "extensionTokens"
   >;
   const pagers: Array<() => Promise<Array<{ _id: PurgeId }>>> = [
     () =>
@@ -176,6 +177,11 @@ async function purgePass(
     () =>
       ctx.db
         .query("upgradeRequests")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .take(100),
+    () =>
+      ctx.db
+        .query("extensionTokens")
         .withIndex("by_user", (q) => q.eq("userId", userId))
         .take(100),
   ];

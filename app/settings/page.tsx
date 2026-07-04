@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ExtensionSettingsCard } from "@/components/extension-settings-card";
 
 // Mirrors convex/account.ts CONFIRM_PHRASE — the server checks it again, so
 // a bypassed client still can't delete without the exact phrase.
@@ -41,6 +42,8 @@ export default function Settings() {
       </header>
 
       <PlanCard />
+
+      <ExtensionSettingsCard />
 
       <Card className="mt-6 border-destructive/40">
         <CardHeader>

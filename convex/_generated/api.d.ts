@@ -18,6 +18,7 @@ import type * as demo from "../demo.js";
 import type * as devSeed from "../devSeed.js";
 import type * as edges from "../edges.js";
 import type * as extension from "../extension.js";
+import type * as extensionAuth from "../extensionAuth.js";
 import type * as feed from "../feed.js";
 import type * as feedback from "../feedback.js";
 import type * as goals from "../goals.js";
@@ -56,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   devSeed: typeof devSeed;
   edges: typeof edges;
   extension: typeof extension;
+  extensionAuth: typeof extensionAuth;
   feed: typeof feed;
   feedback: typeof feedback;
   goals: typeof goals;

@@ -1,19 +1,24 @@
-import { internalMutation, internalQuery } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { MutationCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { promoteOrInsertLead } from "./ingest";
+import { enforceCaptureRateLimit } from "./rateLimit";
 
-// Receives mutual connections read off a Lead's LinkedIn profile by the browser
-// extension, and stores them as linkedin_mutual edges (connector → lead) in ONE
-// user's graph. The owner is resolved by the HTTP layer (convex/http.ts): the
-// authenticated user when the extension sends a JWT, else the demo account.
+// The browser extension captures one LinkedIn profile the signed-in user is
+// viewing (a Lead) plus the mutual connections LinkedIn shows (the connectors
+// on the warm path), and stores them in THAT user's graph. The owner is
+// resolved by the HTTP layer from a scoped token (convex/http.ts,
+// convex/extensionAuth.ts); there is no anonymous or demo write path.
 
-async function findOrCreate(
+// A mutual is a 1st-degree connection of the caller, so find them by slug or
+// create them as a connector.
+async function findOrCreateConnector(
   ctx: MutationCtx,
   userId: Id<"users">,
   slug: string,
   name: string,
-  role: "lead" | "connector",
 ): Promise<Id<"persons">> {
   const existing = await ctx.db
     .query("persons")
@@ -27,36 +32,41 @@ async function findOrCreate(
     name,
     linkedinUrl: slug,
     isSelf: false,
-    role,
-    relationshipToYou: role === "connector" ? "connected" : "not_connected",
+    role: "connector",
+    relationshipToYou: "connected",
   });
 }
 
-export const ingestMutuals = internalMutation({
+// Capture a profile + its mutuals for one owner. User-initiated only (the
+// extension fires this on a click), server-side rate-limited per user, then
+// schedules the same post-import pipeline (computeEdges + a rank pass under the
+// existing reserves) that a LinkedIn import runs.
+export const captureProfile = internalMutation({
   args: {
     userId: v.id("users"),
     leadSlug: v.string(),
     leadName: v.optional(v.string()),
     mutuals: v.array(v.object({ name: v.string(), slug: v.string() })),
   },
-  returns: v.object({ edges: v.number() }),
+  returns: v.object({ edges: v.number(), leadSlug: v.string() }),
   handler: async (ctx, args) => {
-    const leadId = await findOrCreate(
-      ctx,
-      args.userId,
-      args.leadSlug,
-      args.leadName ?? args.leadSlug,
-      "lead",
-    );
+    await enforceCaptureRateLimit(ctx, args.userId);
+
+    // The profile person becomes a lead through the ingestLeads overlap rule:
+    // promoted in place if the user already knows them, else inserted.
+    const leadId = await promoteOrInsertLead(ctx, args.userId, {
+      name: args.leadName ?? args.leadSlug,
+      linkedinUrl: args.leadSlug,
+    });
+
     let edges = 0;
     for (const m of args.mutuals) {
-      if (!m.slug) continue;
-      const connectorId = await findOrCreate(
+      if (!m.slug || m.slug === args.leadSlug) continue;
+      const connectorId = await findOrCreateConnector(
         ctx,
         args.userId,
         m.slug,
-        m.name,
-        "connector",
+        m.name || m.slug,
       );
       const fromEdges = await ctx.db
         .query("edges")
@@ -77,29 +87,11 @@ export const ingestMutuals = internalMutation({
       edges++;
     }
     await ctx.db.patch(leadId, { mutualsStatus: "done" });
-    return { edges };
-  },
-});
 
-// One crawl batch of the owner's leads still missing mutuals. Iterates the
-// index and skips "done" rows as it goes (a take-then-filter would stop seeing
-// pending leads once the oldest rows are all done); the extension drains the
-// batch, re-fetches, and eventually reaches every pending lead.
-export const pendingLeads = internalQuery({
-  args: { userId: v.id("users") },
-  returns: v.array(v.object({ slug: v.string(), name: v.string() })),
-  handler: async (ctx, args) => {
-    const out: { slug: string; name: string }[] = [];
-    const leads = ctx.db
-      .query("persons")
-      .withIndex("by_user_and_role", (q) =>
-        q.eq("userId", args.userId).eq("role", "lead"),
-      );
-    for await (const p of leads) {
-      if (p.mutualsStatus === "done" || !p.linkedinUrl) continue;
-      out.push({ slug: p.linkedinUrl, name: p.name });
-      if (out.length >= 200) break;
-    }
-    return out;
+    // Recompute bridges + re-rank so the new lead and its warm paths appear.
+    await ctx.scheduler.runAfter(0, internal.linkedinImport.afterImport, {
+      userId: args.userId,
+    });
+    return { edges, leadSlug: args.leadSlug };
   },
 });

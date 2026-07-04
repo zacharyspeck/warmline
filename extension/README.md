@@ -1,85 +1,75 @@
-# Warmline — LinkedIn Mutuals extension
+# Warmline — Capture LinkedIn profiles extension
 
-A tiny Manifest V3 Chrome extension. When you open a **Lead's** LinkedIn profile
-(`linkedin.com/in/<slug>`), it reads the visible **mutual connections** section —
-the **Connectors** on your **Warm path** — and POSTs them to Warmline's Convex
-backend, which stores each as a `linkedin_mutual` edge (`connector → lead`).
+A tiny Manifest V3 Chrome extension. On a **LinkedIn profile you are viewing**
+(`linkedin.com/in/<slug>`), you click **Capture** in the popup. It reads that
+profile (a **Lead**) and its visible **mutual connections** (the **Connectors**
+on your **Warm path**) and posts them to Warmline, which stores the person as a
+lead and each mutual as a `linkedin_mutual` edge (`connector → lead`) in **your**
+graph, then recomputes bridges and re-ranks your feed.
 
-Plain JavaScript. No build step, no bundler, no dependencies.
+Capture is **user-initiated only**. There is no background worker, no queue, and
+no crawling: one click, one capture. Plain JavaScript, no build step.
 
 ```
 extension/
-  manifest.json   MV3 manifest (content script on /in/*, SW background)
-  content.js      reads the mutual-connections DOM on a profile page
-  background.js   service worker: queues + POSTs to Convex, retries on failure
+  manifest.json   MV3 manifest (content script on /in/*, popup action)
+  content.js      reads a profile's DOM only when the popup asks (on your click)
+  popup.html/js   connect (server URL + token) and the Capture button
   README.md       this file
 ```
 
-## HTTP contract (real)
+## Auth
+
+Every capture carries a **scoped token** you generate in Warmline **Settings →
+Browser extension**. The server hashes the token, resolves your account, and
+stamps every write with your user id. Only the hash is stored, so the token is
+shown once and can be regenerated but not re-read. There is no anonymous or demo
+write path.
+
+## HTTP contract
 
 ```
-POST <CONVEX_HTTP_URL>/extension/mutuals
+POST <SERVER_URL>/extension/capture
 Content-Type: application/json
+Authorization: Bearer <your token>
 
 { "leadSlug": "jane-doe-123", "leadName": "Jane Doe",
   "mutuals": [ { "name": "Sam Lee", "slug": "sam-lee-456" }, ... ] }
 
-200 OK → { "edges": 3 }
+200 → { "edges": 3, "leadSlug": "jane-doe-123" }
+401 → missing/invalid token
+429 → per-user rate limit hit
 ```
 
-Implemented in `convex/http.ts` + `convex/extension.ts`. The endpoint is **idempotent**:
-re-posting the same lead/mutuals does not create duplicate edges, so retries are safe.
-`mutuals` entries without a `slug` are ignored server-side.
+Implemented in `convex/http.ts` + `convex/extension.ts` + `convex/extensionAuth.ts`.
+The lead is deduped through the same `ingestLeads` overlap logic (promoted in
+place if you already know them, never duplicated); re-capturing the same profile
+does not create duplicate edges.
 
 ## Setup
 
-1. **Set your Convex HTTP URL.** Convex serves `httpRouter` routes from the
-   `*.convex.site` domain (NOT `*.convex.cloud`). Find it in `.env.local` as
-   `NEXT_PUBLIC_CONVEX_SITE_URL` (e.g. `https://fantastic-gazelle-504.convex.site`).
+1. **Install.** Download the zip from the Warmline **Connectors** page (the
+   Download button), unzip it, then in `chrome://extensions` turn on **Developer
+   mode** and **Load unpacked** the unzipped folder.
+2. **Connect.** In Warmline **Settings → Browser extension**, copy the **Server
+   URL** and generate a **token**. Open the extension popup, paste both, and click
+   **Save connection**. (The server URL is your deployment's `*.convex.site`
+   origin, shown in Settings.)
+3. **Capture.** Open a `linkedin.com/in/...` profile you want as a lead and click
+   **Capture this profile**. The popup reports the lead and how many mutual
+   connections it captured.
 
-   Either edit the constant in `background.js`:
-   ```js
-   const DEFAULT_CONVEX_HTTP_URL = "https://<your-id>.convex.site";
-   ```
-   …or set it at runtime from the service-worker console (see step 3):
-   ```js
-   chrome.storage.local.set({ "warmline:convexHttpUrl": "https://<your-id>.convex.site" })
-   ```
+## Selectors will drift
 
-2. **Load unpacked.**
-   - Open `chrome://extensions`.
-   - Toggle **Developer mode** on (top-right).
-   - Click **Load unpacked** and select this `extension/` folder.
+LinkedIn rotates its CSS class names constantly. Every DOM selector in
+`content.js` is best-effort with fallbacks and flagged `SELECTOR:` in comments.
+If capture stops finding mutuals, those are the lines to update. Many profile
+layouts render only the mutuals' avatars (linking to a search facet, not
+per-person `/in/` links), so a capture can legitimately return few or zero
+slug-bearing mutuals; the lead itself is still captured.
 
-3. **Verify.** On `chrome://extensions`, click the extension's **service worker**
-   link to open its console. Open any `linkedin.com/in/...` profile that has mutual
-   connections — you should see `[Warmline] sent …` (content script) and
-   `[Warmline] ingested … → N edge(s)` (background) once the POST returns 200.
+## Pacing caveat
 
-## How it works
-
-- `content.js` runs at `document_idle` on `/in/*`. LinkedIn is a SPA and hydrates
-  late, so it polls (~10s) and watches the DOM with a `MutationObserver`, sending
-  one payload once the mutual-connections section appears. It only **reads** the
-  DOM — no clicks, no navigation.
-- `background.js` merges payloads per `leadSlug` into a `chrome.storage.local`
-  queue, POSTs each item, and clears it on `200`. Offline / `5xx` keep the item
-  and a `chrome.alarms` timer retries ~every minute; non-retryable `4xx` are dropped.
-
-## ⚠️ Selectors will drift
-
-LinkedIn rotates its CSS class names constantly. Every DOM selector in `content.js`
-is best-effort with fallbacks and flagged `SELECTOR:` in comments. If capture stops
-working, those are the lines to update. Note many profile layouts render only the
-mutuals' avatars (linking to a search facet, not per-person `/in/` links), so live
-capture can legitimately return few or zero slug-bearing mutuals.
-
-## ⚠️ Pacing / ban caveat — read before scraping
-
-LinkedIn aggressively rate-limits and bans automated profile access. **Keep it to
-~80 profiles/day, paced like a human** (this extension is passive — it only fires
-when *you* manually open a profile — but bulk-opening profiles still trips limits).
-
-For the hackathon **demo, use pre-cached data, not live scraping.** Pull a handful
-of real profiles ahead of time to seed the graph, then demo against that. Treat live
-capture as opportunistic enrichment, never as a bulk crawler.
+LinkedIn rate-limits automated access. This extension is passive (it only fires
+when you click Capture on a profile you opened), and there is a per-user
+server-side rate limit, but keep captures paced like a human.

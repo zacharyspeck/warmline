@@ -180,9 +180,9 @@ export const CONNECTORS: ConnectorDef[] = [
     Icon: ChromeIcon,
     blurb: "Capture your LinkedIn mutual connections",
     extension: {
-      downloadUrl: "https://github.com/warmline/extension/releases/latest",
+      downloadUrl: "/api/extension/download",
       intro:
-        "Mutual connections are visible only in LinkedIn's logged-in UI. The extension reads them from profiles you open, in your own session",
+        "Capture a LinkedIn profile and its mutual connections from profiles you open, on a click, in your own session",
       steps: [
         { text: "Download the Warmline extension and unzip it" },
         {
@@ -190,7 +190,7 @@ export const CONNECTORS: ConnectorDef[] = [
         },
         { text: "Click Load unpacked and select the unzipped folder" },
         {
-          text: "Pin Warmline, then open a Lead's LinkedIn profile to capture mutuals",
+          text: "Paste your Settings token, then click Capture on a profile",
         },
       ],
       buttonLabel: "I've installed it",

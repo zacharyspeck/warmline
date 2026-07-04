@@ -1,9 +1,10 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { getAuthUserId } from "@convex-dev/auth/server";
-import { Id } from "./_generated/dataModel";
+import { ConvexError } from "convex/values";
 import { auth } from "./auth";
+import { sha256Hex } from "./extensionAuth";
+import { RATE_LIMIT_ERROR } from "./rateLimit";
 
 const http = httpRouter();
 
@@ -15,26 +16,27 @@ const cors = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
-// Whose graph the extension touches: ONLY the signed-in user whose valid
-// Convex Auth JWT is on the request; anything else resolves null and the
-// routes return 401. The old WARMLINE_EXTENSION_TOKEN demo fallback is gone
-// by owner decision: the demo account's content changes only through the
-// daily cron and the internal admin loaders, never through these routes.
-async function authedUser(ctx: {
-  auth: { getUserIdentity: () => Promise<unknown> };
-}): Promise<Id<"users"> | null> {
-  try {
-    return await getAuthUserId(ctx as Parameters<typeof getAuthUserId>[0]);
-  } catch {
-    return null;
-  }
-}
-
-// Browser extension posts mutual connections read off a Lead's LinkedIn profile.
+// The extension's ONLY write path. Whose graph it touches is resolved from a
+// scoped Bearer token minted in Settings (convex/extensionAuth.ts): the server
+// hashes the token and looks up the owner, stamping every capture with that
+// user. No token → 401. There is no anonymous or demo write path, and no
+// background crawling (capture is user-initiated in the extension popup).
 http.route({
-  path: "/extension/mutuals",
+  path: "/extension/capture",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
+    const authz = req.headers.get("Authorization") ?? "";
+    const token = authz.startsWith("Bearer ") ? authz.slice(7).trim() : "";
+    if (!token) {
+      return new Response("unauthorized", { status: 401, headers: cors });
+    }
+    const userId = await ctx.runQuery(internal.extensionAuth.resolveToken, {
+      tokenHash: await sha256Hex(token),
+    });
+    if (!userId) {
+      return new Response("unauthorized", { status: 401, headers: cors });
+    }
+
     let body: {
       leadSlug?: string;
       leadName?: string;
@@ -48,46 +50,26 @@ http.route({
     if (!body.leadSlug) {
       return new Response("leadSlug required", { status: 400, headers: cors });
     }
-    // Extension writes require a signed-in user and land in THEIR graph.
-    const userId = await authedUser(ctx);
-    if (!userId) {
-      return new Response("unauthorized", { status: 401, headers: cors });
+
+    try {
+      const result = await ctx.runMutation(internal.extension.captureProfile, {
+        userId,
+        leadSlug: body.leadSlug,
+        leadName: body.leadName,
+        mutuals: (body.mutuals ?? []).filter((m) => m && m.slug),
+      });
+      return Response.json(result, { headers: cors });
+    } catch (err) {
+      if (err instanceof ConvexError && err.data === RATE_LIMIT_ERROR) {
+        return new Response(RATE_LIMIT_ERROR, { status: 429, headers: cors });
+      }
+      return new Response("capture failed", { status: 500, headers: cors });
     }
-    const result = await ctx.runMutation(internal.extension.ingestMutuals, {
-      userId,
-      leadSlug: body.leadSlug,
-      leadName: body.leadName,
-      mutuals: (body.mutuals ?? []).filter((m) => m && m.slug),
-    });
-    return Response.json(result, { headers: cors });
   }),
 });
 
 http.route({
-  path: "/extension/mutuals",
-  method: "OPTIONS",
-  handler: httpAction(async () => new Response(null, { headers: cors })),
-});
-
-// Returns leads whose mutual connections haven't been captured yet.
-http.route({
-  path: "/extension/leads",
-  method: "GET",
-  handler: httpAction(async (ctx) => {
-    // Same rule as POST /extension/mutuals: a signed-in user's own graph only.
-    const userId = await authedUser(ctx);
-    if (!userId) {
-      return new Response("unauthorized", { status: 401, headers: cors });
-    }
-    const leads = await ctx.runQuery(internal.extension.pendingLeads, {
-      userId,
-    });
-    return Response.json({ leads }, { headers: cors });
-  }),
-});
-
-http.route({
-  path: "/extension/leads",
+  path: "/extension/capture",
   method: "OPTIONS",
   handler: httpAction(async () => new Response(null, { headers: cors })),
 });

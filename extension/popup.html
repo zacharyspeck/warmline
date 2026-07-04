@@ -1,325 +1,154 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Warmline</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=320, initial-scale=1" />
+    <style>
+      :root {
+        --amber: #e5813b;
+        --charcoal: #1b1613;
+        --card: #241d18;
+        --ink: #f3ebe1;
+        --muted: #b5a28e;
+        --border: rgba(243, 235, 225, 0.12);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        width: 320px;
+        background: var(--charcoal);
+        color: var(--ink);
+        font-family:
+          ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+        font-size: 13px;
+      }
+      .wrap {
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+        font-size: 15px;
+      }
+      .brand .dot {
+        width: 20px;
+        height: 20px;
+        border-radius: 6px;
+        background: var(--amber);
+        display: inline-block;
+      }
+      label {
+        display: block;
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      input {
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--card);
+        color: var(--ink);
+        font-size: 12px;
+        font-family: inherit;
+      }
+      input::placeholder {
+        color: rgba(181, 162, 142, 0.6);
+      }
+      .field {
+        margin-bottom: 10px;
+      }
+      button {
+        width: 100%;
+        padding: 9px 12px;
+        border-radius: 9px;
+        border: none;
+        font-weight: 600;
+        font-size: 13px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .primary {
+        background: var(--amber);
+        color: var(--charcoal);
+      }
+      .ghost {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--border);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .status {
+        font-size: 12px;
+        line-height: 1.4;
+        min-height: 16px;
+      }
+      .status.ok {
+        color: #7fd6a2;
+      }
+      .status.err {
+        color: #f0a58a;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="brand"><span class="dot"></span> Warmline</div>
 
-  :root {
-    --bg:        oklch(0.16 0.008 285);
-    --surface:   oklch(0.205 0.011 285);
-    --raised:    oklch(0.26 0.012 285);
-    --hover:     oklch(0.29 0.014 285);
-    --border:    oklch(1 0 0 / 0.08);
-    --hair:      oklch(1 0 0 / 0.05);
-    --ink:       oklch(0.95 0.006 80);
-    --muted:     oklch(0.64 0.014 285);
-    --primary:   oklch(0.905 0.035 90);
-    --green:     oklch(0.82 0.11 165);
-    --orange:    oklch(0.85 0.1 85);
-    --shadow-s:  inset 0 1px 0 oklch(1 0 0 / 0.07), 0 1px 2px oklch(0 0 0 / 0.45), 0 2px 8px oklch(0 0 0 / 0.3);
-    --velour:    linear-gradient(to bottom, oklch(0.235 0.013 285), oklch(0.185 0.01 285));
-    --velour-raised: linear-gradient(to bottom, oklch(0.305 0.014 286), oklch(0.245 0.012 286));
-  }
+      <div class="card">
+        <div class="field">
+          <label for="serverUrl">Server URL</label>
+          <input
+            id="serverUrl"
+            type="text"
+            placeholder="https://your-id.convex.site"
+            autocomplete="off"
+          />
+        </div>
+        <div class="field">
+          <label for="token">Token (from Settings)</label>
+          <input
+            id="token"
+            type="password"
+            placeholder="wl_…"
+            autocomplete="off"
+          />
+        </div>
+        <button id="saveBtn" class="ghost">Save connection</button>
+        <div
+          id="connState"
+          class="muted"
+          style="margin-top: 8px; font-size: 11.5px"
+        ></div>
+      </div>
 
-  body {
-    width: 320px;
-    background: var(--bg);
-    color: var(--ink);
-    font-family: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
-    font-size: 13px;
-    line-height: 1.5;
-    -webkit-font-smoothing: antialiased;
-  }
-
-  /* ── Header ── */
-  .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--border);
-    background: var(--velour);
-  }
-  .logo {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: -0.015em;
-    color: var(--ink);
-  }
-  .logo svg { width: 22px; height: 22px; border-radius: 6px; display: block; }
-
-  .status-pill {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--muted);
-    background: var(--raised);
-    border: 1px solid var(--border);
-    border-radius: 99px;
-    padding: 3px 9px 3px 7px;
-  }
-  .status-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--green);
-    box-shadow: 0 0 6px var(--green);
-    animation: pulse 2.5s ease-in-out infinite;
-  }
-  .status-dot.pending {
-    background: var(--orange);
-    box-shadow: 0 0 6px var(--orange);
-  }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-  }
-
-  /* ── Stats ── */
-  .stats {
-    display: flex;
-    border-bottom: 1px solid var(--border);
-  }
-  .stat {
-    flex: 1;
-    padding: 10px 14px;
-    border-right: 1px solid var(--border);
-  }
-  .stat:last-child { border-right: none; }
-  .stat-value {
-    font-size: 19px;
-    font-weight: 650;
-    letter-spacing: -0.025em;
-    color: var(--ink);
-    line-height: 1;
-  }
-  .stat-label {
-    margin-top: 2px;
-    font-size: 10px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-weight: 500;
-  }
-
-  /* ── Section label ── */
-  .section-label {
-    padding: 10px 14px 5px;
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  /* ── Lead list ── */
-  .leads { padding: 0 8px 8px; display: flex; flex-direction: column; gap: 2px; }
-
-  .lead-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 10px;
-    border-radius: 8px;
-    cursor: pointer;
-    text-decoration: none;
-    transition: background 100ms;
-    color: inherit;
-  }
-  .lead-row:hover { background: var(--raised); }
-
-  .avatar {
-    width: 28px; height: 28px;
-    border-radius: 50%;
-    background: var(--raised);
-    border: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--primary);
-    flex-shrink: 0;
-    letter-spacing: 0;
-  }
-
-  .lead-info { flex: 1; min-width: 0; }
-  .lead-name {
-    font-size: 12.5px;
-    font-weight: 500;
-    color: var(--ink);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .lead-meta {
-    font-size: 11px;
-    color: var(--muted);
-  }
-
-  .mutuals-badge {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--muted);
-  }
-
-  /* ── Empty state ── */
-  .empty {
-    padding: 28px 16px;
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 7px;
-  }
-  .empty-title { font-size: 13px; font-weight: 600; color: var(--ink); }
-  .empty-body { font-size: 12px; color: var(--muted); line-height: 1.55; max-width: 220px; }
-
-  /* ── Footer ── */
-  .footer {
-    padding: 9px 14px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: var(--velour);
-  }
-  .footer-meta { font-size: 11px; color: var(--muted); }
-  .open-app {
-    font-size: 11.5px;
-    font-weight: 550;
-    color: var(--primary);
-    background: oklch(0.905 0.035 90 / 0.1);
-    border: 1px solid oklch(0.905 0.035 90 / 0.18);
-    border-radius: 6px;
-    padding: 4px 10px;
-    cursor: pointer;
-    text-decoration: none;
-    transition: background 100ms;
-  }
-  .open-app:hover { background: oklch(0.905 0.035 90 / 0.18); }
-
-  /* ── Sync button ── */
-  .sync-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: calc(100% - 16px);
-    margin: 8px 8px 4px;
-    padding: 8px 14px;
-    border-radius: 8px;
-    font-size: 12.5px;
-    font-weight: 550;
-    color: var(--ink);
-    background: var(--velour-raised);
-    border: 1px solid var(--border);
-    box-shadow: var(--shadow-s);
-    cursor: pointer;
-    transition: opacity 100ms;
-    justify-content: center;
-  }
-  .sync-btn:hover { opacity: 0.85; }
-  .sync-btn:disabled { opacity: 0.45; cursor: default; }
-  .sync-btn svg { flex-shrink: 0; }
-  .sync-btn.running svg { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  .sync-progress {
-    padding: 4px 14px 8px;
-    font-size: 11px;
-    color: var(--muted);
-    text-align: center;
-  }
-  .sync-bar-track {
-    margin: 4px 8px 0;
-    height: 2px;
-    background: var(--raised);
-    border-radius: 99px;
-    overflow: hidden;
-  }
-  .sync-bar-fill {
-    height: 100%;
-    background: var(--primary);
-    border-radius: 99px;
-    transition: width 400ms ease;
-  }
-</style>
-</head>
-<body>
-
-<div class="header">
-  <div class="logo">
-    <!-- Exact same mark as app-chrome.tsx WarmlineMark -->
-    <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-label="Warmline">
-      <defs>
-        <linearGradient id="wm" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="#f6e3ad"/>
-          <stop offset="1" stop-color="#e2b766"/>
-        </linearGradient>
-      </defs>
-      <rect width="64" height="64" rx="16" fill="url(#wm)"/>
-      <g fill="none" stroke="#2a231a" stroke-width="5.5" stroke-linecap="round">
-        <path d="M21.7 38.2 A11 11 0 0 1 42.3 38.2"/>
-        <path d="M15.5 32.5 A19 19 0 0 1 48.5 32.5"/>
-      </g>
-      <circle cx="32" cy="42" r="5" fill="#2a231a"/>
-    </svg>
-    Warmline
-  </div>
-  <div class="status-pill">
-    <div class="status-dot" id="statusDot"></div>
-    <span id="statusText">Active</span>
-  </div>
-</div>
-
-<div class="stats">
-  <div class="stat">
-    <div class="stat-value" id="totalLeads">0</div>
-    <div class="stat-label">Leads</div>
-  </div>
-  <div class="stat">
-    <div class="stat-value" id="totalMutuals">0</div>
-    <div class="stat-label">Warm paths</div>
-  </div>
-  <div class="stat">
-    <div class="stat-value" id="totalSynced">0</div>
-    <div class="stat-label">Synced</div>
-  </div>
-</div>
-
-<button class="sync-btn" id="syncBtn">
-  <svg width="13" height="13" viewBox="-1 -1 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M11.5 2.5A5.5 5.5 0 1 0 12 6.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-    <path d="M9.5 1L12 2.5L10.5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>
-  <span id="syncBtnLabel">Sync LinkedIn profiles</span>
-</button>
-<div class="sync-bar-track" id="syncBarTrack" style="display:none">
-  <div class="sync-bar-fill" id="syncBarFill" style="width:0%"></div>
-</div>
-<div class="sync-progress" id="syncProgress" style="display:none"></div>
-
-<div id="content">
-  <div class="empty">
-    <div class="empty-title">No leads yet</div>
-    <div class="empty-body">Visit a LinkedIn profile to capture warm paths automatically.</div>
-  </div>
-</div>
-
-<div class="footer">
-  <span class="footer-meta" id="lastSync">—</span>
-  <a class="open-app" id="openApp" href="https://warmline-app.vercel.app" target="_blank">Open Warmline →</a>
-</div>
-
-<script src="popup.js"></script>
-</body>
+      <button id="captureBtn" class="primary">Capture this profile</button>
+      <div id="status" class="status muted">
+        Open a LinkedIn profile, then click Capture
+      </div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
 </html>
