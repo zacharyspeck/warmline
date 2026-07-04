@@ -1,7 +1,15 @@
+import type { Metadata } from "next";
 import Home from "./inner";
 import { preloadQuery, preloadedQueryResult } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import Image from "next/image";
+
+// Leftover Convex starter demo — not a public product surface, so keep it out
+// of search indexes.
+export const metadata: Metadata = {
+  title: "Warmline",
+  robots: { index: false, follow: false },
+};
 
 export default async function ServerPage() {
   const preloaded = await preloadQuery(api.myFunctions.listNumbers, {
