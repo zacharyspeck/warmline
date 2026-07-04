@@ -43,6 +43,15 @@ export const GLOBAL_LIMITS: Record<Category, number> = {
 // onboarding/rebuilds spend from the same daily pool.
 export const CRON_JUDGE_PER_RUN = 6;
 
+// ── Zero-lead rank (connector mode) per-run embed bounds ──
+// One rankConnectorsOnly run embeds at most RANK_EMBEDS_PER_RUN people
+// (keeps the action far inside its 10-minute limit; the daily cron finishes
+// the remainder across days), reserving in EMBED_RESERVE_CHUNK slices so a
+// mid-run failure forfeits at most one chunk of reserved budget instead of
+// the whole day's grant.
+export const RANK_EMBEDS_PER_RUN = 300;
+export const EMBED_RESERVE_CHUNK = 50;
+
 // The daily window key, UTC: "2026-07-01". Rollover to a new key IS the reset.
 export function dayKey(now: number): string {
   return new Date(now).toISOString().slice(0, 10);

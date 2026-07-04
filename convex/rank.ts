@@ -9,6 +9,7 @@ import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { embed, judge } from "./openai";
+import { EMBED_RESERVE_CHUNK, RANK_EMBEDS_PER_RUN } from "./limits";
 import {
   cosine,
   reachability,
@@ -536,33 +537,57 @@ async function rankConnectorsOnly(
     cursor = page.continueCursor;
   }
 
-  // ONE batched reserve for everyone missing a vector; embed while the grant
-  // lasts. A zero grant (capped) embeds nothing — cached vectors still rank.
+  // Embed the missing under CHUNKED reserves with a per-run ceiling
+  // (limits.ts): the run stays far inside the action time limit, a mid-run
+  // failure forfeits at most one chunk of reserved budget, and one flaky
+  // embed degrades that person to the tieStrength fallback instead of
+  // aborting the whole run. Whatever scored still gets written below.
   if (missing.length > 0) {
     missing.sort((a, b) => (b.tie ?? 0) - (a.tie ?? 0));
-    const { granted } = await ctx.runMutation(internal.usage.reserve, {
-      userId: input.owner,
-      category: "embed",
-      count: missing.length,
-    });
-    embedsSkipped += missing.length - granted;
-    for (const m of missing.slice(0, granted)) {
-      const text = [m.name, m.headline, m.company].filter(Boolean).join(" — ");
-      const vec = await embed(text);
-      await ctx.runMutation(internal.rank.upsertVector, {
-        personId: m.id,
-        embedding: vec,
+    let remaining = Math.min(missing.length, RANK_EMBEDS_PER_RUN);
+    embedsSkipped += missing.length - remaining;
+    let idx = 0;
+    while (remaining > 0) {
+      const want = Math.min(remaining, EMBED_RESERVE_CHUNK);
+      const { granted } = await ctx.runMutation(internal.usage.reserve, {
+        userId: input.owner,
+        category: "embed",
+        count: want,
       });
-      const score = scoreOf(vec, m.tie);
-      if (score !== null) {
-        keepTop({
-          id: m.id,
-          name: m.name,
-          headline: m.headline,
-          company: m.company,
-          score,
-        });
-        scoredCount++;
+      for (const m of missing.slice(idx, idx + granted)) {
+        try {
+          const text = [m.name, m.headline, m.company]
+            .filter(Boolean)
+            .join(" — ");
+          const vec = await embed(text);
+          await ctx.runMutation(internal.rank.upsertVector, {
+            personId: m.id,
+            embedding: vec,
+          });
+          const score = scoreOf(vec, m.tie);
+          if (score !== null) {
+            keepTop({
+              id: m.id,
+              name: m.name,
+              headline: m.headline,
+              company: m.company,
+              score,
+            });
+            scoredCount++;
+          }
+        } catch (err) {
+          // The reserved slot is burnt (under-use, never overspend); the
+          // person rides the tieStrength fallback until a later run.
+          console.error(`rankConnectorsOnly: embed failed for ${m.id}`, err);
+          embedsSkipped++;
+        }
+      }
+      idx += granted;
+      remaining -= granted;
+      if (granted < want) {
+        // Budget dried up (capped): everyone left is skipped this run.
+        embedsSkipped += remaining;
+        break;
       }
     }
   }
