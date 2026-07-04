@@ -357,6 +357,9 @@ test("extension capture route: rejects anonymous and bogus-token callers; no dem
   expect(postRes.status).toBe(200);
   expect(await postRes.json()).toEqual({
     edges: 1,
+    shown: 1,
+    matched: 1,
+    skipped: 0,
     leadSlug: aLead.linkedinUrl,
   });
   await t.run(async (ctx) => {

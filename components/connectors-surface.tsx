@@ -218,8 +218,12 @@ function ExtensionRow({ def }: { def: ConnectorDef }) {
           and paste it plus the server URL into the extension
         </li>
         <li>
-          5. On a LinkedIn profile you are viewing, click Capture in the
-          extension
+          5. On a LinkedIn profile, click Capture. It grabs the person plus any
+          mutuals shown by name
+        </li>
+        <li>
+          6. If some mutuals show by name only, open that person&rsquo;s mutual
+          connections list and click Capture mutuals shown to add the rest
         </li>
       </ol>
     </div>

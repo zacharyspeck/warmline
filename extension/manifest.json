@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Warmline — Capture LinkedIn profiles",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Capture a LinkedIn profile you are viewing and its mutual connections into your Warmline graph, on a click.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -16,7 +16,10 @@
   ],
   "content_scripts": [
     {
-      "matches": ["https://www.linkedin.com/in/*"],
+      "matches": [
+        "https://www.linkedin.com/in/*",
+        "https://www.linkedin.com/search/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

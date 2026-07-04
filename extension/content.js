@@ -1,18 +1,15 @@
-// content.js — runs on https://www.linkedin.com/in/* (a profile you open).
+// content.js — runs on LinkedIn profile (/in/*) and people-search (/search/*)
+// pages. It NEVER captures on its own. It only scrapes when the popup asks (a
+// user click), replying with what it read. We only READ the DOM (no clicks, no
+// navigation).
 //
-// It NEVER captures on its own. It only scrapes when the popup asks it to (a
-// user click on "Capture"), replying with the profile person (the Lead) and the
-// mutual connections LinkedIn shows (the Connectors on the warm path):
-//   { leadSlug, leadName, mutuals: [{ name, slug }] }
-//
-// We only ever READ the DOM (no clicks, no navigation). LinkedIn markup rotates
-// constantly, so every selector below is best-effort with fallbacks and is
-// flagged "SELECTOR:" — if capture breaks, these are the lines to update.
+// LinkedIn markup rotates constantly, so every selector below is best-effort
+// with fallbacks and flagged "SELECTOR:" — if capture breaks, these are the
+// lines to update.
 
 (function () {
   "use strict";
 
-  // Pull the LinkedIn slug out of any /in/<slug>/ href.
   function slugFromHref(href) {
     if (!href) return null;
     var m = String(href).match(/\/in\/([^/?#]+)/);
@@ -28,7 +25,6 @@
     return (s || "").replace(/\s+/g, " ").trim();
   }
 
-  // Name for an /in/ anchor: prefer img alt / aria-label, fall back to text.
   function nameForAnchor(a) {
     var img = a.querySelector("img[alt]");
     var name =
@@ -44,10 +40,9 @@
     return name;
   }
 
-  // The Lead (this profile page).
   function currentProfile() {
     var slug = slugFromHref(location.pathname);
-    // SELECTOR: profile name <h1>. Class names churn; fall back to first main h1.
+    // SELECTOR: profile name <h1>.
     var h1 =
       document.querySelector("h1.text-heading-xlarge") ||
       document.querySelector("main h1") ||
@@ -55,7 +50,7 @@
     return { slug: slug, name: clean(h1 && h1.textContent) };
   }
 
-  // Find the element anchoring the mutual-connections module.
+  // The element anchoring the mutual-connections module, plus its facet link.
   function findMutualAnchor() {
     // SELECTOR: the "N mutual connections" link → /search/...facetConnectionOf=
     var byFacet =
@@ -71,7 +66,24 @@
     return null;
   }
 
-  // Climb to the surrounding card so we scope the /in/ harvest.
+  function facetHrefFor(anchor) {
+    if (!anchor) return null;
+    var a =
+      (anchor.matches &&
+        anchor.matches('a[href*="facetConnectionOf"], a[href*="connectionOf"]') &&
+        anchor) ||
+      (anchor.querySelector &&
+        (anchor.querySelector('a[href*="facetConnectionOf"]') ||
+          anchor.querySelector('a[href*="connectionOf"]')));
+    var href = a && a.getAttribute("href");
+    if (!href) return null;
+    try {
+      return new URL(href, "https://www.linkedin.com").toString();
+    } catch {
+      return href;
+    }
+  }
+
   function cardFor(anchor) {
     var node = anchor;
     for (var i = 0; i < 5 && node && node.parentElement; i++) {
@@ -81,44 +93,145 @@
     return node || anchor;
   }
 
-  // Collect {name, slug} for each visible mutual connection.
-  function collectMutuals() {
+  // Parse the named-inline variant text, e.g.
+  //   "Phil and Fred are mutual connections"
+  //   "Phil, Fred, and 3 other mutual connections"
+  //   "Phil is a mutual connection"
+  // Returns the NAMED people (the "N other" are unnamed and excluded).
+  function parseNamedMutuals(text) {
+    var t = clean(text);
+    if (!/mutual connection/i.test(t)) return [];
+    var m = t.match(/^(.*?)\s+(?:is a|are)\s+mutual connection/i);
+    var namesPart = m ? m[1] : null;
+    if (!namesPart) {
+      var m2 = t.match(/^(.*?)\s+mutual connection/i);
+      namesPart = m2 ? m2[1] : null;
+    }
+    if (!namesPart) return [];
+    // Drop a trailing "and N other(s)" clause.
+    namesPart = namesPart.replace(/,?\s*and\s+[\d,]+\s+other[s]?$/i, "");
+    var parts = namesPart
+      .split(/,|\band\b/i)
+      .map(clean)
+      .filter(function (p) {
+        return p && !/^\d/.test(p) && !/^other/i.test(p);
+      });
+    return parts;
+  }
+
+  // Mutuals shown on a profile: slug-bearing /in/ links first, else the
+  // named-inline text variant (name-only). Also returns the facet href so the
+  // popup can offer the results-page capture.
+  function collectProfileMutuals() {
     var anchor = findMutualAnchor();
-    if (!anchor) return [];
+    var facetHref = facetHrefFor(anchor);
+    if (!anchor) return { mutuals: [], pattern: "none", facetHref: facetHref };
+
     var card = cardFor(anchor);
     var self = slugFromHref(location.pathname);
     var seen = Object.create(null);
-    var out = [];
+    var linkMutuals = [];
     var links = card.querySelectorAll('a[href*="/in/"]');
     for (var i = 0; i < links.length; i++) {
       var slug = slugFromHref(links[i].getAttribute("href"));
       if (!slug || slug === self || seen[slug]) continue;
       seen[slug] = true;
-      out.push({ name: nameForAnchor(links[i]), slug: slug });
+      linkMutuals.push({ name: nameForAnchor(links[i]), slug: slug });
+    }
+    if (linkMutuals.length) {
+      return { mutuals: linkMutuals, pattern: "links", facetHref: facetHref };
+    }
+
+    var named = parseNamedMutuals(anchor.textContent);
+    if (named.length) {
+      return {
+        mutuals: named.map(function (n) {
+          return { name: n };
+        }),
+        pattern: "named-inline",
+        facetHref: facetHref,
+      };
+    }
+    return { mutuals: [], pattern: "none", facetHref: facetHref };
+  }
+
+  // Best-effort headline for a search result row.
+  function headlineForResult(a) {
+    var row = a;
+    for (var i = 0; i < 5 && row && row.parentElement; i++) {
+      row = row.parentElement;
+      if (row.querySelectorAll('a[href*="/in/"]').length > 1) {
+        row = a.parentElement; // too broad; fall back near the link
+        break;
+      }
+    }
+    // SELECTOR: result subtitle / headline.
+    var sub =
+      (row && row.querySelector('.entity-result__primary-subtitle')) ||
+      (row && row.querySelector('[class*="subtitle"]'));
+    return sub ? clean(sub.textContent) : "";
+  }
+
+  // The visible people-search result rows (the mutual-connections list).
+  function collectSearchResults() {
+    var seen = Object.create(null);
+    var out = [];
+    // SELECTOR: results live in <main>; scoping there skips the nav avatar.
+    var scope = document.querySelector("main") || document;
+    var links = scope.querySelectorAll('a[href*="/in/"]');
+    for (var i = 0; i < links.length && out.length < 50; i++) {
+      var slug = slugFromHref(links[i].getAttribute("href"));
+      if (!slug || seen[slug]) continue;
+      var name = nameForAnchor(links[i]);
+      if (!name) continue;
+      seen[slug] = true;
+      var headline = headlineForResult(links[i]);
+      out.push({
+        name: name,
+        slug: slug,
+        headline: headline || undefined,
+      });
     }
     return out;
   }
 
-  // User-initiated only: reply to the popup's capture request. No auto-send.
+  // User-initiated only. No auto-send.
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
-    if (!msg || msg.type !== "warmline:capture") return false;
-    try {
-      var lead = currentProfile();
-      if (!lead.slug) {
-        sendResponse({ ok: false, error: "Open a LinkedIn profile first" });
-        return true;
+    if (!msg) return false;
+
+    if (msg.type === "warmline:capture") {
+      try {
+        var lead = currentProfile();
+        if (!lead.slug) {
+          sendResponse({ ok: false, error: "Open a LinkedIn profile first" });
+          return true;
+        }
+        var found = collectProfileMutuals();
+        sendResponse({
+          ok: true,
+          pattern: found.pattern,
+          facetHref: found.facetHref,
+          payload: {
+            leadSlug: lead.slug,
+            leadName: lead.name || lead.slug,
+            mutuals: found.mutuals,
+          },
+        });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) });
       }
-      sendResponse({
-        ok: true,
-        payload: {
-          leadSlug: lead.slug,
-          leadName: lead.name || lead.slug,
-          mutuals: collectMutuals(),
-        },
-      });
-    } catch (e) {
-      sendResponse({ ok: false, error: String(e) });
+      return true;
     }
-    return true;
+
+    if (msg.type === "warmline:captureResults") {
+      try {
+        sendResponse({ ok: true, mutuals: collectSearchResults() });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) });
+      }
+      return true;
+    }
+
+    return false;
   });
 })();

@@ -120,7 +120,7 @@ test("capture: promotes a known connector to a lead and forms mutual edges", asy
         { name: "Target Person", slug: "target" }, // self-mutual, ignored
       ],
     });
-    expect(res.edges).toBe(1);
+    expect(res).toMatchObject({ edges: 1, shown: 1, matched: 1, skipped: 0 });
     await t.finishAllScheduledFunctions(vi.runAllTimers);
   } finally {
     vi.useRealTimers();
@@ -194,6 +194,79 @@ test("capture: per-user rate limit blocks past the cap", async () => {
       mutuals: [],
     }),
   ).rejects.toThrow(/Too many/);
+});
+
+test("capture: name-only mutuals resolve against existing connectors", async () => {
+  const t = convexTest(schema, modules);
+  const { userId } = await newUser(t, "names@example.com");
+  await t.run(async (ctx) => {
+    await ctx.db.insert("icp", { userId, text: "Meet AI founders", source: {} });
+    for (const [name, slug] of [
+      ["Phil Smith", "phil-smith"],
+      ["Fred Jones", "fred-jones"],
+      ["Phil Adams", "phil-adams"], // a second Phil → first-name "phil" is ambiguous
+    ]) {
+      await ctx.db.insert("persons", {
+        userId,
+        name,
+        linkedinUrl: slug,
+        isSelf: false,
+        role: "connector",
+        relationshipToYou: "connected",
+      });
+    }
+  });
+  await capOpenAI(t, userId);
+
+  let res;
+  vi.stubEnv("OPENAI_API_KEY", "test-key");
+  vi.stubGlobal("fetch", async () => {
+    throw new Error("no OpenAI");
+  });
+  vi.useFakeTimers();
+  try {
+    res = await t.mutation(internal.extension.captureProfile, {
+      userId,
+      leadSlug: "troymartig",
+      leadName: "Troy Martig",
+      mutuals: [
+        { name: "Phil Smith" }, // exact full name → unique
+        { name: "Fred" }, // first name → unique (only one Fred)
+        { name: "Phil" }, // first name → ambiguous (two Phils) → skip
+        { name: "Nobody Here" }, // no match → skip
+      ],
+    });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+  } finally {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  }
+  expect(res).toMatchObject({ shown: 4, matched: 2, skipped: 2, edges: 2 });
+
+  // The two matched connectors bridge to the new lead; no name-only person was
+  // created (we never invent a slug we don't have).
+  const { lead, edges, personCount } = await t.run(async (ctx) => {
+    const lead = await ctx.db
+      .query("persons")
+      .withIndex("by_user_and_linkedinUrl", (q) =>
+        q.eq("userId", userId).eq("linkedinUrl", "troymartig"),
+      )
+      .first();
+    const edges = await ctx.db
+      .query("edges")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    const persons = await ctx.db
+      .query("persons")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    return { lead, edges, personCount: persons.length };
+  });
+  expect(lead?.role).toBe("lead");
+  expect(edges.filter((e) => e.type === "linkedin_mutual").length).toBe(2);
+  // 3 connectors + 1 new lead, nothing invented for "Phil"/"Nobody Here".
+  expect(personCount).toBe(4);
 });
 
 test("http capture: 401 without a token, 200 with a valid token", async () => {
