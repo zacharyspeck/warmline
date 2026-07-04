@@ -19,6 +19,47 @@ content, one commit per task with per-section adversarial reviews.
   against happenstance.ai and third-party reviews in July 2026; re-verify the
   claims before you publish.
 
+### Merge and deploy
+
+- **One morning merge ships everything.** `zach/launch-polish` sits on top of
+  `zach/design-skin` which sits on top of `zach/phase2-accounts`. Merging
+  `zach/launch-polish` into `main` brings all three. Review bottom-up if you
+  like, but only the one merge is required. `main` is untouched by this run.
+- **Domain + `NEXT_PUBLIC_SITE_URL`.** Buy the domain, then set
+  `NEXT_PUBLIC_SITE_URL` so the sitemap, robots, canonical/OG URLs, and the
+  `metadataBase` stop falling back to `http://localhost:3000`. Until it is set,
+  social/OG cards point at localhost (correct-by-default Next.js behavior, but
+  wrong for production).
+- **Production `INVITE_CODE`.** Set `INVITE_CODE` on the production Convex
+  deployment. While unset, every signup is rejected (fail-closed).
+
+### Follow-ups from this run
+
+- **Stripe is still a future supervised session.** No payment code exists;
+  Request access only writes an `upgradeRequests` row. Do the Stripe wiring
+  with a human in the loop.
+- **Revisit `RANK_EMBEDS_PER_RUN`** (`convex/limits.ts`, currently 300). It
+  paces the zero-lead connector rank so one action stays inside the 10-minute
+  limit; a large network (e.g. 2,000 people) fully ranks over roughly seven
+  daily cron runs. Raise it (or move to self-rescheduling) if you want big
+  imports hot faster, watching the OpenAI spend caps.
+- **Signup rate limit is a pre-flow throttle, not an auth-provider gate.** It
+  is enforced by the sign-up page before `signIn` and the counter/window live
+  in Convex, so it throttles the normal signup path. A direct call to
+  `api.auth.signIn` skips it (the invite gate still guards account creation).
+  Convex Auth's Password provider consumes `profile()` synchronously, so a
+  fully unbypassable DB-backed limit would need a custom credentials provider.
+  Decide if the edge/provider hardening is worth it before public launch.
+- **Minor SEO consistency (optional).** `/goals` (added this run) is a private
+  auth-gated route but is not in the `robots.ts` disallow list alongside
+  `/settings`, `/connectors`, `/onboarding`, `/server`. It is functionally
+  inert (the middleware redirects crawlers to `/signin`), but add it for
+  consistency if you touch `robots.ts`. The leftover Convex starter `/server`
+  page is now `robots: noindex`; consider deleting it entirely.
+- **A test account** `review-sweep-1783121576730@example.com` (3 synthetic
+  people) lives on the dev deployment from browser verification. Remove it via
+  Settings → delete my data if you do not want it.
+
 ## Review and merge
 
 - **Review and merge `zach/phase2-accounts` first** (Phases D, E, F: demo,

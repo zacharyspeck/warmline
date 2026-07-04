@@ -8,16 +8,24 @@ language lives in the glossary at the bottom.
 
 ## Where the work lives
 
-Two feature branches, both green and pushed to origin, `main` untouched.
+Three stacked feature branches, all green and pushed to origin, `main`
+untouched.
 
 - **`zach/phase2-accounts`** — the backend and accounts work, Phases A
   through F plus cost caps and the extension lockdown
 - **`zach/design-skin`** — branched from phase2-accounts, carries the visual
   skin, the SEO baseline, and the pricing surface. Merging design-skin brings
   phase2-accounts with it
+- **`zach/launch-polish`** — branched from design-skin, the launch-readiness
+  run: the real core loop (goals editor, add-targets, restored warm-path
+  graph, connector openers, Settings plan), mobile + a11y + landing perf +
+  app icons, hardening (signup rate limit, error/loading boundaries), and two
+  draft content pages. Merging launch-polish brings design-skin and
+  phase2-accounts with it, so one morning merge into `main` ships everything
 
-Review and merge phase2-accounts first, then design-skin. The full owner
-checklist is in MANUAL_TODO.md.
+Review the branches bottom-up (phase2-accounts, design-skin, launch-polish),
+but a single merge of `zach/launch-polish` into `main` is all that is needed.
+The full owner checklist is in MANUAL_TODO.md.
 
 ## What is built
 
@@ -62,14 +70,43 @@ checklist is in MANUAL_TODO.md.
   row for a signed-in user. There is no payment processing anywhere yet;
   Stripe is a future supervised session
 
+### Launch-polish (zach/launch-polish)
+
+- **The core loop is real**: an imported network produces a ranked feed on its
+  own (the import schedules computeEdges plus a rank pass), the Goals nav opens
+  a real editor (free-text goal plus structured target companies/roles/
+  locations that steer ranking, saving re-ranks), you can add specific target
+  people one at a time or as a pasted list (promoted-not-duplicated, deduped by
+  slug or name+company, bounded reads, then a rank pass), and the expanded card
+  shows the restored animated React Flow warm-path graph (code-split, node-
+  capped, reduced-motion aware)
+- **The agent is visible**: the top connector recommendations get a judge-
+  drafted reconnect opener through the existing judge reserve, degrading
+  silently when capped; N lives in convex/limits.ts
+- **Settings plan section**: current tier and today's usage from the existing
+  metering, a Request access button, and a link to /pricing; delete-my-data is
+  unchanged
+- **Mobile + a11y + perf**: the nav rail collapses to a slide-over drawer below
+  md (desktop pixel-identical), a keyboard focus baseline plus the drawer's
+  focus trap, and the signed-out landing trimmed (fonts to the one used weight,
+  React Flow already code-split off it). Favicon and Apple touch icon from the
+  W mark, per-route titles, and a verified OG image
+- **Hardening**: a server-side signup rate limit (a per-identifier fixed window
+  in Convex, pruned by a daily cron), and app-wide loading, error, and 404
+  boundaries so a Convex blip never white-screens the feed or connectors
+- **Draft content**: /compare/happenstance and /guides/warm-intros exist as
+  unlinked noindex drafts awaiting the owner's voice pass (MANUAL_TODO.md)
+
 ## Stack and testing
 
 Convex is the entire backend runtime: schema, typed queries, realtime feed,
 actions for the OpenAI and scrape work, a daily cron, and vector scoring.
 Next.js App Router with Convex Auth password sign-in behind the invite gate.
-The test suite runs on vitest with convex-test and the edge runtime, 70 tests
-green, no real OpenAI calls: tests either stub the key so any call throws and
-prove zero calls, or stub fetch and count. convex/isolation.test.ts and
+The test suite runs on vitest with convex-test and the edge runtime, 89 tests
+green (70 at the start of launch-polish; +19 across the goals/targets, import
+loop, connector openers, plan usage, and signup rate-limit work), no real
+OpenAI calls: tests either stub the key so any call throws and prove zero
+calls, or stub fetch and count. convex/isolation.test.ts and
 convex/limits.test.ts are the hard gates.
 
 ## Domain language
