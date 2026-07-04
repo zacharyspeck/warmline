@@ -94,7 +94,9 @@ export default function AppChrome({
     pathname === "/signin" ||
     pathname === "/privacy" ||
     pathname === "/terms" ||
-    pathname === "/pricing"
+    pathname === "/pricing" ||
+    pathname.startsWith("/compare") ||
+    pathname.startsWith("/guides")
   )
     return <>{children}</>;
 

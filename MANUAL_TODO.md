@@ -4,6 +4,21 @@ Everything that needs the owner, across the autonomous runs on 1-2 July 2026.
 Companion handoffs in `artifacts/` (local only): `2026-07-01-session-handoff.md`
 and `2026-07-02-session-handoff.md`.
 
+## Launch-polish run (`zach/launch-polish`, 3-4 July 2026)
+
+Branched from `zach/design-skin`; core-loop, mobile/polish, hardening, and
+content, one commit per task with per-section adversarial reviews.
+
+### Draft content pages need your voice pass
+
+- `/compare/happenstance` and `/guides/warm-intros` are DRAFTS. They are
+  unlinked and noindex (robots `noindex,nofollow`, absent from the sitemap and
+  the nav), follow the copy rules, and are factual and generous about
+  Happenstance. But they are in my voice, not yours. Do a voice pass before you
+  link them anywhere or make them indexable. The Happenstance facts were checked
+  against happenstance.ai and third-party reviews in July 2026; re-verify the
+  claims before you publish.
+
 ## Review and merge
 
 - **Review and merge `zach/phase2-accounts` first** (Phases D, E, F: demo,
