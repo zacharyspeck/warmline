@@ -73,6 +73,51 @@ export async function deriveIcp(
   return data.choices[0]?.message?.content?.trim() ?? "";
 }
 
+// A short reconnect opener for a connector already in the user's network:
+// message them to rekindle the relationship and ask for help reaching the
+// people in the goal. Draft only, one gpt-4o-mini call, the same copy rules
+// as the judge enforced at the source (sanitizeCopy). Empty string on a shape
+// miss so the caller degrades to no opener.
+export async function draftReconnectOpener(input: {
+  icpText: string;
+  connector: { name: string; headline?: string; company?: string };
+}): Promise<string> {
+  const sys =
+    "You are a warm-networking assistant. Draft ONE short opener, 1 to 2 sentences, " +
+    "the user can send to reconnect with a person ALREADY in their network and ask for help reaching the kind of people in their goal. " +
+    "Ground it only in the given facts about the person; never invent specifics. Output strict JSON {\"opener\":\"...\"}. " +
+    "WRITING STYLE, follow exactly: plain English with no buzzwords. " +
+    "Never use an em dash anywhere. " +
+    "Never phrase anything as a 'this, not that' contrast; state the positive point on its own. " +
+    "Write complete sentences with normal punctuation, but do NOT end the opener with a period.";
+  const user = JSON.stringify(input);
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey()}`,
+    },
+    body: JSON.stringify({
+      model: CHAT_MODEL,
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.4,
+    }),
+  });
+  if (!res.ok)
+    throw new Error(`OpenAI opener ${res.status}: ${await res.text()}`);
+  const data = (await res.json()) as {
+    choices: { message: { content: string } }[];
+  };
+  const parsed = JSON.parse(data.choices[0].message.content) as {
+    opener?: string;
+  };
+  return sanitizeCopy(typeof parsed.opener === "string" ? parsed.opener : "");
+}
+
 export type Judgement = {
   why: { text: string; confidence: "high" | "medium" | "low" }[];
   how: string[]; // 3 concrete ways to connect

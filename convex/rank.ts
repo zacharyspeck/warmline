@@ -8,8 +8,12 @@ import { internal } from "./_generated/api";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
-import { embed, judge } from "./openai";
-import { EMBED_RESERVE_CHUNK, RANK_EMBEDS_PER_RUN } from "./limits";
+import { embed, judge, draftReconnectOpener } from "./openai";
+import {
+  EMBED_RESERVE_CHUNK,
+  RANK_EMBEDS_PER_RUN,
+  CONNECTOR_OPENERS_PER_RUN,
+} from "./limits";
 import {
   cosine,
   reachability,
@@ -244,6 +248,7 @@ export const replaceConnectorRecs = internalMutation({
           v.object({ text: v.string(), confidence: v.number() }),
         ),
         how: v.array(v.string()),
+        opener: v.string(),
       }),
     ),
   },
@@ -290,7 +295,7 @@ export const replaceConnectorRecs = internalMutation({
         score: rec.score,
         whyBullets: rec.whyBullets,
         how: rec.how,
-        opener: "",
+        opener: rec.opener,
         unlocksIds: [],
         judged: false,
       });
@@ -491,6 +496,7 @@ async function rankConnectorsOnly(
   input: {
     icpId: Id<"icp">;
     owner: Id<"users">;
+    icpText: string;
     scoringVector: number[] | null;
     embedsSkipped: number;
   },
@@ -624,20 +630,60 @@ async function rankConnectorsOnly(
   }
 
   top.sort((a, b) => b.score - a.score);
-  const recs = top.slice(0, CONNECTOR_REC_LIMIT).map((c) => {
+  const chosen = top.slice(0, CONNECTOR_REC_LIMIT);
+
+  // Make the agent visible: draft a short reconnect opener for the top few
+  // connectors (a judge-category spend, reserved first). A short grant or a
+  // failed draft degrades SILENTLY to no opener, exactly like a capped judge
+  // on the lead path — the row still ships with its heuristic why/how.
+  const openers = new Map<Id<"persons">, string>();
+  const wantOpeners = Math.min(CONNECTOR_OPENERS_PER_RUN, chosen.length);
+  if (wantOpeners > 0) {
+    const { granted } = await ctx.runMutation(internal.usage.reserve, {
+      userId: input.owner,
+      category: "judge",
+      count: wantOpeners,
+    });
+    for (const c of chosen.slice(0, granted)) {
+      try {
+        const opener = await draftReconnectOpener({
+          icpText: input.icpText,
+          connector: {
+            name: c.name,
+            headline: c.headline ?? undefined,
+            company: c.company ?? undefined,
+          },
+        });
+        if (opener) openers.set(c.id, opener);
+      } catch (err) {
+        console.error(
+          `rankConnectorsOnly: opener draft failed for ${c.id}`,
+          err,
+        );
+      }
+    }
+  }
+
+  const recs = chosen.map((c) => {
     const copy = connectorCopy(c);
     return {
       personId: c.id,
       score: c.score,
       whyBullets: copy.whyBullets,
       how: copy.how,
+      opener: openers.get(c.id) ?? "",
     };
   });
   await ctx.runMutation(internal.rank.replaceConnectorRecs, {
     icpId: input.icpId,
     recs,
   });
-  return { scored: scoredCount, judged: 0, judgeDegraded: 0, embedsSkipped };
+  return {
+    scored: scoredCount,
+    judged: openers.size,
+    judgeDegraded: 0,
+    embedsSkipped,
+  };
 }
 
 // The ranking pipeline: embed → goal-fit × reachability → judge top N → write
@@ -726,6 +772,7 @@ export const rebuild = internalAction({
       return await rankConnectorsOnly(ctx, {
         icpId: args.icpId,
         owner,
+        icpText: data.icpText,
         scoringVector,
         embedsSkipped,
       });

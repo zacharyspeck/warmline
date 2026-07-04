@@ -52,6 +52,13 @@ export const CRON_JUDGE_PER_RUN = 6;
 export const RANK_EMBEDS_PER_RUN = 300;
 export const EMBED_RESERVE_CHUNK = 50;
 
+// ── Connector-mode reconnect openers per run ──
+// The zero-lead rank drafts a short reconnect opener for at most this many of
+// the top connector recommendations, each a judge-category spend. Small so one
+// run can't drain the day's judge budget (shared with lead judging + manual
+// rebuilds); a cap hit degrades silently to no opener.
+export const CONNECTOR_OPENERS_PER_RUN = 3;
+
 // The daily window key, UTC: "2026-07-01". Rollover to a new key IS the reset.
 export function dayKey(now: number): string {
   return new Date(now).toISOString().slice(0, 10);
