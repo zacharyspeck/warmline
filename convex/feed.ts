@@ -326,7 +326,12 @@ export const listForUser = internalQuery({
 // people, has a rank pass produced recommendations yet, and is today's embed
 // budget already exhausted (ranking resumes with tomorrow's cron).
 export const status = query({
-  args: {},
+  // `day` is a subscription key, nothing more: Convex queries only re-run
+  // when data they READ changes, and dayKey(Date.now()) is not data — so a
+  // capped-at-23:50 subscription would keep saying "capped" long past the
+  // UTC midnight budget reset. The client passes its own day string and
+  // re-subscribes when it rolls over; the handler still derives its own day.
+  args: { day: v.optional(v.string()) },
   returns: v.union(
     v.object({
       hasSources: v.boolean(),

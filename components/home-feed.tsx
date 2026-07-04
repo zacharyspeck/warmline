@@ -18,7 +18,19 @@ export default function HomeFeed() {
   const router = useRouter();
 
   const feed = useQuery(api.feed.list, { limit: 40 });
-  const status = useQuery(api.feed.status, {});
+  // The UTC day is part of the status subscription key: budgets reset on the
+  // day rollover, and without re-subscribing a "capped" answer from last
+  // night would stick around after the reset (queries only re-run on data
+  // changes, not on time passing).
+  const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10));
+  useEffect(() => {
+    const t = setInterval(
+      () => setDay(new Date().toISOString().slice(0, 10)),
+      60_000,
+    );
+    return () => clearInterval(t);
+  }, []);
+  const status = useQuery(api.feed.status, { day });
   const icp = useQuery(api.icp.latest, {});
 
   useEffect(() => {
@@ -116,7 +128,7 @@ export default function HomeFeed() {
             <p className="mb-4 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
               {status.embedCapped
                 ? "Your network is imported, but today's ranking budget is used up. People are ordered by tie strength until ranking resumes tomorrow"
-                : "Your network is imported. Ranking against your goal is in progress, so this order is provisional"}
+                : "Your network is imported but not yet ranked against your goal, so this order is provisional. Ranking runs after an import and with the daily refresh"}
             </p>
           ) : null}
           <FeedList
@@ -169,7 +181,7 @@ function EmptyFeed({
     <p className="py-16 text-center text-sm text-muted-foreground">
       {status.embedCapped
         ? "Your network is imported, but today's ranking budget is used up. Ranking resumes tomorrow"
-        : "Your network is imported. Ranking against your goal is in progress…"}
+        : "Your network is imported but not yet ranked against your goal. Ranking runs after an import and with the daily refresh"}
     </p>
   );
 }
