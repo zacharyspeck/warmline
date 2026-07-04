@@ -207,8 +207,8 @@ export const HOW_IT_WORKS: { Icon: IconType; title: string; body: string }[] = [
   },
   {
     Icon: ClockIcon,
-    title: "Processing takes a bit",
-    body: "Your feed refreshes on the daily run, so newly connected sources can take up to a day to show up in it",
+    title: "Your imports show up right away",
+    body: "An import starts building your feed as soon as it finishes. Ranking everyone fully against your goal continues on the daily run, so a large network keeps sharpening over a day or two",
   },
   {
     Icon: ShieldIcon,
