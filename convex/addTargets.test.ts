@@ -127,6 +127,21 @@ test("addTargets: an existing person is promoted, not duplicated (name + company
   expect(persons[0].relationshipToYou).toBe("connected"); // still in-network
 });
 
+test("addTargets: rejects an over-large batch to keep reads bounded", async () => {
+  const t = convexTest(schema, modules);
+  const { userId, as } = await newUser(t, "targets-cap@example.com");
+  await t.run(async (ctx) =>
+    ctx.db.insert("icp", { userId, text: "Meet AI founders", source: {} }),
+  );
+  const rows = Array.from({ length: 101 }, (_, i) => ({
+    name: `Person ${i}`,
+    company: "BigCo",
+  }));
+  await expect(as.mutation(api.ingest.addTargets, { rows })).rejects.toThrow(
+    /up to 100/,
+  );
+});
+
 test("addTargets: dedupes by LinkedIn slug and promotes in place", async () => {
   const t = convexTest(schema, modules);
   const { userId, as } = await newUser(t, "targets-slug@example.com");

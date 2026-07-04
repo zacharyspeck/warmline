@@ -37,10 +37,17 @@ async function findPerson(
   return null;
 }
 
+// Add-targets is user-driven with arbitrary pasted lists, so the name+company
+// dedup is BOUNDED to keep one mutation's reads bounded regardless of roster
+// size: a single add scans at most MAX_TARGETS_PER_ADD × TARGET_SCAN docs. The
+// slug path (findPerson, indexed .first()) still dedups exactly; name+company
+// dedup is best-effort past TARGET_SCAN people at one company (a rare case that
+// at worst inserts a duplicate lead, never corrupts data).
+const MAX_TARGETS_PER_ADD = 100;
+const TARGET_SCAN = 200;
+
 // Dedup a target with no slug against the caller's existing persons by name
-// within the same company (case-insensitive). Mirrors linkedinImport's
-// company-scan dedup: iterate with an early exit so it stays correct even
-// when a company's roster outgrows any bounded take().
+// within the same company (case-insensitive), bounded to TARGET_SCAN reads.
 async function findByNameCompany(
   ctx: MutationCtx,
   userId: Id<"users">,
@@ -49,15 +56,15 @@ async function findByNameCompany(
 ): Promise<Doc<"persons"> | null> {
   const target = name.trim().toLowerCase();
   if (!target) return null;
-  const sameCompany = ctx.db
+  const sameCompany = await ctx.db
     .query("persons")
     .withIndex("by_user_and_company", (q) =>
       q.eq("userId", userId).eq("company", company),
-    );
-  for await (const p of sameCompany) {
-    if (p.name.trim().toLowerCase() === target) return p;
-  }
-  return null;
+    )
+    .take(TARGET_SCAN);
+  return (
+    sameCompany.find((p) => p.name.trim().toLowerCase() === target) ?? null
+  );
 }
 
 // Fill only fields that are currently empty; never clobber existing data.
@@ -264,6 +271,9 @@ export const addTargets = mutation({
   returns: v.object({ added: v.number(), promoted: v.number() }),
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx);
+    // Bound the per-call work: caps reads at MAX_TARGETS_PER_ADD × TARGET_SCAN.
+    if (args.rows.length > MAX_TARGETS_PER_ADD)
+      throw new Error(`Add up to ${MAX_TARGETS_PER_ADD} targets at a time`);
     let added = 0;
     let promoted = 0;
     let changed = false;
@@ -276,6 +286,8 @@ export const addTargets = mutation({
       if (!existing && company) {
         existing = await findByNameCompany(ctx, userId, name, company);
       }
+      // Never reclassify the You/self row as a lead.
+      if (existing?.isSelf) continue;
       if (existing) {
         const patch = fillMissing(existing, {
           company,

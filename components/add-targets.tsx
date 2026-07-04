@@ -52,6 +52,10 @@ export function AddTargets() {
       setError("Add at least a name");
       return;
     }
+    if (rows.length > 100) {
+      setError("Add up to 100 at a time");
+      return;
+    }
     setBusy(true);
     setError(null);
     setStatus(null);
