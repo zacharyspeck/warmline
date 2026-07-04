@@ -26,7 +26,6 @@ type Row = Doc<"connectors">;
 // Connect button, no dropzone, no dialog, no extension download.
 export function ConnectorsSurface() {
   const rows = useQuery(api.connectors.list);
-  const linkedinRows = (rows ?? []).filter((r) => r.provider === "linkedin");
 
   return (
     <div>
@@ -35,12 +34,16 @@ export function ConnectorsSurface() {
       {/* S5: LinkedIn is the hero — a working drag-and-drop right on the page. */}
       <LinkedInHero
         def={CONNECTORS.find((d) => d.provider === "linkedin")!}
-        rows={linkedinRows}
+        rows={(rows ?? []).filter((r) => r.provider === "linkedin")}
       />
 
       <section className="mt-3 flex flex-col gap-2.5">
         {CONNECTORS.filter((def) => def.provider !== "linkedin").map((def) => (
-          <ComingSoonRow key={def.provider} def={def} />
+          <ComingSoonRow
+            key={def.provider}
+            def={def}
+            rows={(rows ?? []).filter((r) => r.provider === def.provider)}
+          />
         ))}
       </section>
     </div>
@@ -137,25 +140,34 @@ function LinkedInHero({ def, rows }: { def: ConnectorDef; rows: Row[] }) {
 }
 
 // ── Every other source: visible, but honestly not wired up yet ──────────────
-function ComingSoonRow({ def }: { def: ConnectorDef }) {
+// Rows recorded before the source was disabled (an earlier beta upload, a
+// linked extension) stay visible and removable here — otherwise their stored
+// exports would be stranded with no UI path to delete them.
+function ComingSoonRow({ def, rows }: { def: ConnectorDef; rows: Row[] }) {
   const { Icon } = def;
   return (
-    <div
-      aria-disabled
-      className="flex items-center gap-4 rounded-xl border border-border bg-card p-4 opacity-60 [box-shadow:var(--shadow-s)]"
-    >
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-lg [background-image:var(--velour-raised)] [box-shadow:var(--shadow-button)]">
-        <Icon className="size-5" aria-hidden />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="font-medium">{def.name}</span>
-          <Badge variant="secondary" className="text-[10px]">
-            Coming soon
-          </Badge>
+    <div className="rounded-xl border border-border bg-card p-4 [box-shadow:var(--shadow-s)]">
+      <div aria-disabled className="flex items-center gap-4 opacity-60">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg [background-image:var(--velour-raised)] [box-shadow:var(--shadow-button)]">
+          <Icon className="size-5" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">{def.name}</span>
+            <Badge variant="secondary" className="text-[10px]">
+              Coming soon
+            </Badge>
+          </div>
+          <p className="truncate text-sm text-muted-foreground">{def.blurb}</p>
         </div>
-        <p className="truncate text-sm text-muted-foreground">{def.blurb}</p>
       </div>
+      {rows.length > 0 ? (
+        <div className="mt-3 flex flex-col gap-2">
+          {rows.map((row) => (
+            <RecordRow key={row._id} row={row} />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
