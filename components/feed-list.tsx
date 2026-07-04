@@ -266,7 +266,7 @@ function FeedCard({
                 </span>
               </div>
             ) : (
-              <span className="text-xs text-muted-foreground/40">
+              <span className="text-xs text-muted-foreground">
                 No warm path yet
               </span>
             )}

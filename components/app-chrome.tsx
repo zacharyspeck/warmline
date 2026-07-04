@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
@@ -48,15 +48,45 @@ export default function AppChrome({
   // vote buttons use, instead of navigating or bouncing off /signin.
   const [signupOpen, setSignupOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
 
-  // Close the mobile drawer on Escape.
+  // Mobile drawer keyboard access: focus into the drawer on open, trap Tab
+  // within it, close on Escape, and restore focus to the menu button on close.
   useEffect(() => {
     if (!navOpen) return;
+    const drawer = drawerRef.current;
+    const trigger = menuBtnRef.current; // capture for the cleanup
+    const focusables = () =>
+      Array.from(
+        drawer?.querySelectorAll<HTMLElement>(
+          'button, [href], input, [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+    focusables()[0]?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setNavOpen(false);
+      if (e.key === "Escape") {
+        setNavOpen(false);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const list = focusables();
+      if (list.length === 0) return;
+      const first = list[0];
+      const last = list[list.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      trigger?.focus();
+    };
   }, [navOpen]);
 
   if (
@@ -167,6 +197,7 @@ export default function AppChrome({
         <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4 [background-image:var(--velour)] md:hidden">
           <WarmlineLockup />
           <button
+            ref={menuBtnRef}
             type="button"
             aria-label="Open menu"
             aria-expanded={navOpen}
@@ -195,7 +226,10 @@ export default function AppChrome({
             className="absolute inset-0 bg-black/50"
             onClick={() => setNavOpen(false)}
           />
-          <div className="absolute left-0 top-0 flex h-full w-64 flex-col border-r border-border [background-image:var(--velour)]">
+          <div
+            ref={drawerRef}
+            className="absolute left-0 top-0 flex h-full w-64 flex-col border-r border-border [background-image:var(--velour)]"
+          >
             <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
               <WarmlineLockup />
               <button

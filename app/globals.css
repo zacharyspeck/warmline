@@ -161,4 +161,15 @@ body {
   h3 {
     font-family: var(--font-display), var(--font-geist-sans), ui-sans-serif, sans-serif;
   }
+
+  /* Keyboard focus baseline (a11y): a visible amber ring on any focusable
+     element that doesn't style its own. Only shows for keyboard focus, so it
+     never changes mouse/pointer rendering. Components that manage their own
+     focus (shadcn Button/Input use focus-visible:ring after outline-none)
+     override this. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
 }
