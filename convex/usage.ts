@@ -1,5 +1,6 @@
-import { internalMutation, internalQuery } from "./_generated/server";
+import { internalMutation, internalQuery, query } from "./_generated/server";
 import { v } from "convex/values";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import {
   CATEGORIES,
   Category,
@@ -100,6 +101,48 @@ const countsValidator = v.object({
   judge: v.number(),
   embed: v.number(),
   scrape: v.number(),
+});
+
+// The signed-in caller's plan tier + today's own spend against their caps —
+// read-only (mirrors reserve's per-user math), for the Settings Plan section.
+// `day` is a subscription cache-buster, like feed.status: the client passes
+// its UTC day so a "used today" answer can't outlive the midnight reset.
+export const myUsage = query({
+  args: { day: v.optional(v.string()) },
+  returns: v.union(
+    v.object({
+      tier: v.string(),
+      used: countsValidator,
+      caps: countsValidator,
+    }),
+    v.null(),
+  ),
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return null;
+    const user = await ctx.db.get(userId);
+    const tier = user?.tier ?? DEFAULT_TIER;
+    const day = dayKey(Date.now());
+    const row = await ctx.db
+      .query("usage")
+      .withIndex("by_user_and_day", (q) =>
+        q.eq("userId", userId).eq("day", day),
+      )
+      .unique();
+    return {
+      tier,
+      used: {
+        judge: row?.judge ?? 0,
+        embed: row?.embed ?? 0,
+        scrape: row?.scrape ?? 0,
+      },
+      caps: {
+        judge: userDailyCap(tier, "judge"),
+        embed: userDailyCap(tier, "embed"),
+        scrape: userDailyCap(tier, "scrape"),
+      },
+    };
+  },
 });
 
 // Admin view of today's spend: every user who spent anything, plus the global
