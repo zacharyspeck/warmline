@@ -1,4 +1,9 @@
-import { mutation, type MutationCtx } from "./_generated/server";
+import {
+  mutation,
+  internalMutation,
+  type MutationCtx,
+} from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v, ConvexError } from "convex/values";
 
 // Server-side rate limit for signup / invite-code attempts. A fixed window per
@@ -61,6 +66,34 @@ export const recordSignupAttempt = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     await enforceSignupRateLimit(ctx, args.identifier);
+    return null;
+  },
+});
+
+// A row is only meaningful for one window; once its window has elapsed the next
+// attempt just resets it, so an old row is safely deletable. The daily cron
+// drops rows well past their window (STALE_AFTER_MS) in bounded batches so the
+// table stays bounded and no normalized email lingers indefinitely — including
+// after a user deletes their account. Self-reschedules until drained.
+const STALE_AFTER_MS = 60 * 60 * 1000; // 1 hour (6× the window, generous margin)
+
+export const purgeStaleSignupAttempts = internalMutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    const cutoff = Date.now() - STALE_AFTER_MS;
+    const stale = await ctx.db
+      .query("signupAttempts")
+      .withIndex("by_windowStart", (q) => q.lt("windowStart", cutoff))
+      .take(500);
+    for (const row of stale) await ctx.db.delete(row._id);
+    if (stale.length === 500) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.rateLimit.purgeStaleSignupAttempts,
+        {},
+      );
+    }
     return null;
   },
 });

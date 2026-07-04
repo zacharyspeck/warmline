@@ -75,7 +75,11 @@ export default defineSchema({
     identifier: v.string(),
     windowStart: v.number(),
     count: v.number(),
-  }).index("by_identifier", ["identifier"]),
+  })
+    .index("by_identifier", ["identifier"])
+    // Lets the daily purge cron drop stale rows (elapsed windows) so the table
+    // stays bounded and no normalized email lingers past its window.
+    .index("by_windowStart", ["windowStart"]),
 
   // Pricing-page "Request access" rows (no payment processing; the owner
   // follows up by hand). One row per user per plan; purged by delete-my-data

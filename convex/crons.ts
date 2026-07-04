@@ -105,5 +105,13 @@ crons.cron(
   internal.usage.logDailySummary,
   {},
 );
+// Drop stale signup rate-limit rows so the table stays bounded and no
+// normalized email lingers past its window.
+crons.cron(
+  "warmline purge signup attempts",
+  "30 3 * * *",
+  internal.rateLimit.purgeStaleSignupAttempts,
+  {},
+);
 
 export default crons;

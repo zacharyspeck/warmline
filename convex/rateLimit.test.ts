@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
 import { expect, test } from "vitest";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import schema from "./schema";
 import { SIGNUP_MAX_ATTEMPTS, SIGNUP_WINDOW_MS } from "./rateLimit";
 
@@ -69,4 +69,25 @@ test("rate limit: the window resets after it elapses", async () => {
   await expect(
     t.mutation(api.rateLimit.recordSignupAttempt, { identifier: email }),
   ).resolves.toBeNull();
+});
+
+test("rate limit: the purge cron drops stale rows but keeps fresh ones", async () => {
+  const t = convexTest(schema, modules);
+  await t.mutation(api.rateLimit.recordSignupAttempt, { identifier: "fresh@example.com" });
+  await t.mutation(api.rateLimit.recordSignupAttempt, { identifier: "stale@example.com" });
+  // Age one row well past its window.
+  await t.run(async (ctx) => {
+    const stale = await ctx.db
+      .query("signupAttempts")
+      .withIndex("by_identifier", (q) => q.eq("identifier", "stale@example.com"))
+      .unique();
+    await ctx.db.patch(stale!._id, {
+      windowStart: Date.now() - 2 * 60 * 60 * 1000, // 2h ago
+    });
+  });
+  await t.mutation(internal.rateLimit.purgeStaleSignupAttempts, {});
+  const remaining = await t.run(async (ctx) =>
+    (await ctx.db.query("signupAttempts").collect()).map((r) => r.identifier),
+  );
+  expect(remaining).toEqual(["fresh@example.com"]);
 });
