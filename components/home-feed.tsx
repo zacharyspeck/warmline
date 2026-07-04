@@ -9,6 +9,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import type { FunctionReturnType } from "convex/server";
 import { FeedList } from "@/components/feed-list";
 import { WarmPath } from "@/components/warm-path";
+import { AddTargets } from "@/components/add-targets";
 import { Button } from "@/components/ui/button";
 
 // The signed-in feed. Rendered by app/page.tsx only for authenticated visitors
@@ -152,6 +153,8 @@ export default function HomeFeed() {
 
 // The truthful staged empty states. Which one shows depends on where the
 // pipeline actually is — and "No people yet" NEVER renders when persons exist.
+// Every state also offers the add-targets affordance, so a user with no
+// network yet can seed specific people to reach directly.
 function EmptyFeed({
   status,
 }: {
@@ -163,26 +166,30 @@ function EmptyFeed({
         Loading your network…
       </p>
     );
-  if (!status.hasPersons) {
-    return (
-      <div className="py-16 text-center">
-        <p className="text-sm text-muted-foreground">
-          {status.hasSources
-            ? "A source is connected but no contacts have been imported from it yet"
-            : "No sources connected yet. Import your network to build your feed"}
-        </p>
-        <Button variant="primary" asChild className="mt-4">
-          <Link href="/connectors">Connect a source</Link>
-        </Button>
-      </div>
-    );
-  }
   return (
-    <p className="py-16 text-center text-sm text-muted-foreground">
-      {status.embedCapped
-        ? "Your network is imported, but today's ranking budget is used up. Ranking resumes tomorrow"
-        : "Your network is imported but not yet ranked against your goal. Ranking runs after an import and with the daily refresh"}
-    </p>
+    <div className="py-10">
+      {!status.hasPersons ? (
+        <div className="text-center">
+          <p className="text-sm text-muted-foreground">
+            {status.hasSources
+              ? "A source is connected but no contacts have been imported from it yet"
+              : "No sources connected yet. Import your network to build your feed"}
+          </p>
+          <Button variant="primary" asChild className="mt-4">
+            <Link href="/connectors">Connect a source</Link>
+          </Button>
+        </div>
+      ) : (
+        <p className="text-center text-sm text-muted-foreground">
+          {status.embedCapped
+            ? "Your network is imported, but today's ranking budget is used up. Ranking resumes tomorrow"
+            : "Your network is imported but not yet ranked against your goal. Ranking runs after an import and with the daily refresh"}
+        </p>
+      )}
+      <div className="mx-auto mt-8 max-w-md">
+        <AddTargets />
+      </div>
+    </div>
   );
 }
 

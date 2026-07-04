@@ -8,6 +8,7 @@ import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { TagInput } from "@/components/tag-input";
+import { AddTargets } from "@/components/add-targets";
 
 type Targets = { companies: string[]; roles: string[]; locations: string[] };
 const EMPTY: Targets = { companies: [], roles: [], locations: [] };
@@ -146,6 +147,10 @@ export default function Goals() {
             Back to your feed
           </Link>
         </div>
+      </div>
+
+      <div className="mt-6">
+        <AddTargets />
       </div>
 
       <p className="mt-4 text-xs text-muted-foreground">

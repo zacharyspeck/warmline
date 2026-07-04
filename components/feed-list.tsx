@@ -325,6 +325,14 @@ function FeedCard({
           onClick={(e) => e.stopPropagation()}
         >
           {renderGraph(row.id)}
+          {row.kind === "lead" && row.mutuals.length === 0 && (
+            <p className="mt-3 rounded-lg border border-dashed border-border bg-background/40 px-3 py-2 text-xs text-muted-foreground">
+              No warm bridge found yet. A shared company between {row.name.split(/\s+/)[0]} and
+              your imported connections would surface one, and the Chrome
+              extension will find mutual connections when it returns. For now
+              this is a direct-outreach lead
+            </p>
+          )}
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div>
               <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/60">

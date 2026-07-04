@@ -2,6 +2,7 @@ import { mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { requireUser } from "./authz";
 
 // Ingest for the CALLER's own graph. Every mutation requires a signed-in user
@@ -32,6 +33,29 @@ async function findPerson(
       )
       .first();
     if (p) return p;
+  }
+  return null;
+}
+
+// Dedup a target with no slug against the caller's existing persons by name
+// within the same company (case-insensitive). Mirrors linkedinImport's
+// company-scan dedup: iterate with an early exit so it stays correct even
+// when a company's roster outgrows any bounded take().
+async function findByNameCompany(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  name: string,
+  company: string,
+): Promise<Doc<"persons"> | null> {
+  const target = name.trim().toLowerCase();
+  if (!target) return null;
+  const sameCompany = ctx.db
+    .query("persons")
+    .withIndex("by_user_and_company", (q) =>
+      q.eq("userId", userId).eq("company", company),
+    );
+  for await (const p of sameCompany) {
+    if (p.name.trim().toLowerCase() === target) return p;
   }
   return null;
 }
@@ -219,6 +243,72 @@ export const ingestLeads = mutation({
       }
     }
     return { leads, attendances };
+  },
+});
+
+const targetRow = v.object({
+  name: v.string(),
+  company: v.optional(v.string()),
+  linkedinUrl: v.optional(v.string()),
+});
+
+// Add specific target people from the Goals surface / feed empty area, one at
+// a time or as a pasted list. Reuses ingestLeads' overlap logic: a target
+// already in the network (matched by LinkedIn slug OR by name + company) is
+// PROMOTED to a lead in place, never duplicated; a brand-new target is
+// inserted as a not-connected lead. Then schedules the same post-import
+// pipeline (computeEdges + a rank pass under the existing reserves) so
+// shared-company connectors become bridges and warm paths appear.
+export const addTargets = mutation({
+  args: { rows: v.array(targetRow) },
+  returns: v.object({ added: v.number(), promoted: v.number() }),
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx);
+    let added = 0;
+    let promoted = 0;
+    let changed = false;
+    for (const row of args.rows) {
+      const name = row.name.trim();
+      if (!name) continue;
+      const company = row.company?.trim() || undefined;
+      // Dedup by slug first (precise), then by name + company.
+      let existing = await findPerson(ctx, userId, row.linkedinUrl);
+      if (!existing && company) {
+        existing = await findByNameCompany(ctx, userId, name, company);
+      }
+      if (existing) {
+        const patch = fillMissing(existing, {
+          company,
+          linkedinUrl: row.linkedinUrl,
+        });
+        if (existing.role !== "lead") patch.role = "lead";
+        if (Object.keys(patch).length) {
+          await ctx.db.patch(existing._id, patch);
+          changed = true;
+        }
+        promoted++;
+      } else {
+        await ctx.db.insert("persons", {
+          userId,
+          name,
+          company,
+          linkedinUrl: row.linkedinUrl,
+          isSelf: false,
+          role: "lead",
+          relationshipToYou: "not_connected",
+        });
+        added++;
+        changed = true;
+      }
+    }
+    // Recompute bridges + re-rank so the new leads get warm paths, exactly as
+    // a LinkedIn import does. Scheduled so the mutation returns immediately.
+    if (changed) {
+      await ctx.scheduler.runAfter(0, internal.linkedinImport.afterImport, {
+        userId,
+      });
+    }
+    return { added, promoted };
   },
 });
 
