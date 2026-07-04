@@ -227,7 +227,12 @@ function Dropzone({
         accept={accept}
         disabled={busy}
         className="hidden"
-        onChange={(e) => handle(e.target.files)}
+        onChange={(e) => {
+          handle(e.target.files);
+          // Reset so picking the SAME file again (e.g. retrying after a
+          // failed upload) still fires a change event.
+          e.currentTarget.value = "";
+        }}
       />
     </label>
   );
