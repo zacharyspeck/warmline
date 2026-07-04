@@ -160,11 +160,18 @@ export const upsertVector = internalMutation({
   },
 });
 
-// One page of a user's connectors joined to their cached vectors — the
-// zero-lead rank walks EVERY connector this way (bounded reads per call), so
-// large imports rank progressively instead of stopping at a candidate cap.
+// One page of a user's connectors, each scored against the caller-supplied
+// scoring vector — the zero-lead rank walks EVERY connector this way
+// (bounded reads per call), so large imports rank progressively instead of
+// stopping at a candidate cap. The cosine happens HERE so the cached
+// 1536-float vectors never leave the database (a 20k network would
+// otherwise ship ~250 MB of embeddings to the action per run).
 export const connectorPage = internalQuery({
-  args: { userId: v.id("users"), paginationOpts: paginationOptsValidator },
+  args: {
+    userId: v.id("users"),
+    scoringVector: v.union(v.array(v.number()), v.null()),
+    paginationOpts: paginationOptsValidator,
+  },
   returns: v.object({
     connectors: v.array(
       v.object({
@@ -173,7 +180,9 @@ export const connectorPage = internalQuery({
         headline: v.union(v.string(), v.null()),
         company: v.union(v.string(), v.null()),
         tieStrength: v.union(v.number(), v.null()),
-        vector: v.union(v.array(v.number()), v.null()),
+        // null when unembedded OR no scoring vector was supplied.
+        score: v.union(v.number(), v.null()),
+        hasVector: v.boolean(),
       }),
     ),
     isDone: v.boolean(),
@@ -193,13 +202,21 @@ export const connectorPage = internalQuery({
         .query("personVectors")
         .withIndex("by_person", (q) => q.eq("personId", p._id))
         .first();
+      const score =
+        vec && args.scoringVector
+          ? feedScore(
+              (cosine(vec.embedding, args.scoringVector) + 1) / 2,
+              reachability("connected", p.tieStrength ?? undefined),
+            )
+          : null;
       connectors.push({
         id: p._id,
         name: p.name,
         headline: p.headline ?? null,
         company: p.company ?? null,
         tieStrength: p.tieStrength ?? null,
-        vector: vec?.embedding ?? null,
+        score,
+        hasVector: vec !== null,
       });
     }
     return {
@@ -502,28 +519,27 @@ async function rankConnectorsOnly(
         headline: string | null;
         company: string | null;
         tieStrength: number | null;
-        vector: number[] | null;
+        score: number | null;
+        hasVector: boolean;
       }[];
       isDone: boolean;
       continueCursor: string;
     } = await ctx.runQuery(internal.rank.connectorPage, {
       userId: input.owner,
+      scoringVector: input.scoringVector,
       paginationOpts: { numItems: 50, cursor },
     });
     for (const c of page.connectors) {
-      if (c.vector) {
-        const score = scoreOf(c.vector, c.tieStrength);
-        if (score !== null) {
-          keepTop({
-            id: c.id,
-            name: c.name,
-            headline: c.headline,
-            company: c.company,
-            score,
-          });
-          scoredCount++;
-        }
-      } else {
+      if (c.score !== null) {
+        keepTop({
+          id: c.id,
+          name: c.name,
+          headline: c.headline,
+          company: c.company,
+          score: c.score,
+        });
+        scoredCount++;
+      } else if (!c.hasVector) {
         missing.push({
           id: c.id,
           name: c.name,
