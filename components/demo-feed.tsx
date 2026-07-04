@@ -5,9 +5,23 @@ import { useConvexAuth, useQuery } from "convex/react";
 import { useRouter } from "next/navigation";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import dynamic from "next/dynamic";
 import { FeedList } from "@/components/feed-list";
-import { WarmPath } from "@/components/warm-path";
 import { SignupPrompt } from "@/components/signup-prompt";
+
+// Heavy React Flow graph — code-split so the demo landing does not ship it
+// until a card expands.
+const WarmGraph = dynamic(
+  () => import("@/components/warm-graph").then((m) => m.WarmGraph),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[340px] items-center justify-center rounded-xl border border-border bg-background/40 text-xs text-muted-foreground">
+        Loading the warm path…
+      </div>
+    ),
+  },
+);
 
 // The read-only demo feed on the logged-out landing page. Subscribes ONLY to
 // the demo surface (api.demo.*), which the server scopes to the demo account —
@@ -66,5 +80,5 @@ function DemoGraphAccordion({ personId }: { personId: Id<"persons"> }) {
         Tracing the warm path…
       </div>
     );
-  return <WarmPath data={data} />;
+  return <WarmGraph data={data} />;
 }

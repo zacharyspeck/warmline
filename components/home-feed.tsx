@@ -7,10 +7,24 @@ import { useRouter } from "next/navigation";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { FunctionReturnType } from "convex/server";
+import dynamic from "next/dynamic";
 import { FeedList } from "@/components/feed-list";
-import { WarmPath } from "@/components/warm-path";
 import { AddTargets } from "@/components/add-targets";
 import { Button } from "@/components/ui/button";
+
+// The React Flow warm-path graph is heavy (canvas + its stylesheet); code-split
+// it so it only loads when a card actually expands.
+const WarmGraph = dynamic(
+  () => import("@/components/warm-graph").then((m) => m.WarmGraph),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[340px] items-center justify-center rounded-xl border border-border bg-background/40 text-xs text-muted-foreground">
+        Loading the warm path…
+      </div>
+    ),
+  },
+);
 
 // The signed-in feed. Rendered by app/page.tsx only for authenticated visitors
 // (the server branches on the auth cookie); signed-out visitors get the demo
@@ -201,5 +215,5 @@ function GraphAccordion({ personId }: { personId: Id<"persons"> }) {
         Tracing the warm path…
       </div>
     );
-  return <WarmPath data={data} />;
+  return <WarmGraph data={data} />;
 }
