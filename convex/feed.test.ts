@@ -77,6 +77,45 @@ test("fallback heuristic: sorts by score desc, excludes self, flags gatekeepers"
   expect(warm!.score).toBeGreaterThan(cold!.score);
 });
 
+test("in-network connectors appear even when they bridge no lead (reconnect section)", async () => {
+  const t = convexTest(schema, modules);
+  const { userId, as } = await newUser(t, "reconnect@example.com");
+  await t.run(async (ctx) => {
+    await ctx.db.insert("persons", {
+      userId,
+      name: "The Lead",
+      isSelf: false,
+      role: "lead",
+      relationshipToYou: "not_connected",
+    });
+    // In-network connectors that unlock NO lead (no unlockValue). These used to
+    // be filtered out of the feed entirely the moment any lead existed, so a
+    // whole network rendered nowhere.
+    for (let i = 0; i < 3; i++) {
+      await ctx.db.insert("persons", {
+        userId,
+        name: `Colleague ${i}`,
+        isSelf: false,
+        role: "connector",
+        relationshipToYou: "connected",
+        tieStrength: 0.4 + i * 0.1,
+      });
+    }
+  });
+
+  const rows = await as.query(api.feed.list, {});
+  const connectors = rows.filter((r) => r.kind === "connector");
+  expect(connectors.map((r) => r.name).sort()).toEqual([
+    "Colleague 0",
+    "Colleague 1",
+    "Colleague 2",
+  ]);
+  // Each carries a real, non-zero relevance score.
+  for (const r of connectors) expect(r.score).toBeGreaterThan(0);
+  // The lead is still there for the headline section.
+  expect(rows.find((r) => r.name === "The Lead")).toBeDefined();
+});
+
 test("connector row shows its fan-out as a warm-path stack with a total", async () => {
   const t = convexTest(schema, modules);
   const { userId, as } = await newUser(t, "b@example.com");

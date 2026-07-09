@@ -229,9 +229,12 @@ export async function feedForUser(
     }
   }
 
-  // Connector rows ALWAYS appear (the "befriend a connector" mode). Top by
-  // unlockValue — except with zero leads, where nobody has an unlockValue:
-  // then every connector qualifies, ordered by tieStrength.
+  // In-network connectors populate the reconnect section. EVERY in-network
+  // person qualifies (not just gatekeepers): the old unlockValue>0 gate meant a
+  // network with one lead showed only that lead's few bridges and hid the rest
+  // of the network entirely. Order bridges (connectors that unlock a lead)
+  // first, then strongest ties, so the useful people lead but the whole network
+  // is still reachable.
   const seen = new Set(pre.map((x) => x.p._id));
   const connectorDocs = await ctx.db
     .query("persons")
@@ -240,18 +243,15 @@ export async function feedForUser(
     )
     .take(400);
   const topConnectors = connectorDocs
-    .filter(
-      (c) =>
-        !c.isSelf &&
-        !seen.has(c._id) &&
-        (hasLeads ? (c.unlockValue ?? 0) > 0 : true),
-    )
-    .sort((a, b) =>
-      hasLeads
-        ? (b.unlockValue ?? 0) - (a.unlockValue ?? 0)
-        : (b.tieStrength ?? 0) - (a.tieStrength ?? 0),
-    )
-    .slice(0, Math.max(5, Math.floor(limit / 3)));
+    .filter((c) => !c.isSelf && !seen.has(c._id))
+    .sort((a, b) => {
+      if (hasLeads) {
+        const byUnlock = (b.unlockValue ?? 0) - (a.unlockValue ?? 0);
+        if (byUnlock !== 0) return byUnlock;
+      }
+      return (b.tieStrength ?? 0) - (a.tieStrength ?? 0);
+    })
+    .slice(0, limit);
   for (const c of topConnectors) {
     const h = heuristicRow(c);
     // With zero leads these rows are the goal-fit ranking's DEGRADED tail
@@ -272,10 +272,24 @@ export async function feedForUser(
     });
   }
 
-  // Sort, slice, and compute mutuals ONLY for the returned rows (bounds reads).
-  pre.sort((a, b) => b.score - a.score);
+  // SELECT with a per-section budget so a large connector set can never crowd
+  // leads out of the headline (or vice versa), then return the union in global
+  // score order (the demo renders rows as-is; the signed-in client re-splits
+  // into the leads + reconnect sections). Mutuals/warm paths are computed ONLY
+  // for the returned rows, which bounds reads.
+  const leadEntries = pre
+    .filter((x) => x.p.role === "lead")
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+  const connectorEntries = pre
+    .filter((x) => x.p.role === "connector")
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+  const selected = [...leadEntries, ...connectorEntries].sort(
+    (a, b) => b.score - a.score,
+  );
   const rows = [];
-  for (const x of pre.slice(0, limit)) {
+  for (const x of selected) {
     const p = x.p;
     const warmPath = await warmPathFor(ctx, p);
     rows.push({
