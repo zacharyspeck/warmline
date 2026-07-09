@@ -180,25 +180,23 @@ export const discoverForGoal = internalAction({
     );
     let anyFound = false;
     for (const company of companies) {
-      // One scrape unit per company (Firecrawl fetch + the paired extraction
-      // chat), reserved before either happens. Out of budget → honest note, stop.
-      const { granted } = await ctx.runMutation(internal.usage.reserve, {
-        userId: args.userId,
-        category: "scrape",
-        count: 1,
-      });
-      if (granted <= 0) {
-        await ctx.runMutation(internal.discover.recordDiscovery, {
-          userId: args.userId,
-          company,
-          status: "capped",
-          people: [],
-        });
-        break;
-      }
-
+      // Reserve one scrape unit per Firecrawl fetch so the daily scrape cap
+      // bounds the ACTUAL number of Firecrawl calls exactly (a company whose
+      // /team page is empty and falls back to /about costs two units). Out of
+      // budget → honest "capped" note; keep going so every company still gets a
+      // note (later companies just hit the same denied reserve).
       let markdown = "";
+      let capped = false;
       for (const url of candidateUrls(company)) {
+        const { granted } = await ctx.runMutation(internal.usage.reserve, {
+          userId: args.userId,
+          category: "scrape",
+          count: 1,
+        });
+        if (granted <= 0) {
+          capped = true;
+          break;
+        }
         markdown = await scrapeMarkdown(url);
         if (markdown) break;
       }
@@ -206,7 +204,7 @@ export const discoverForGoal = internalAction({
         await ctx.runMutation(internal.discover.recordDiscovery, {
           userId: args.userId,
           company,
-          status: "no_page",
+          status: capped ? "capped" : "no_page",
           people: [],
         });
         continue;
