@@ -24,9 +24,10 @@ const EMBED_PRICE_PER_1M_USD = 0.02;
 const CHARS_PER_TOKEN = 4;
 
 // Raised per-invocation ceiling. High enough to cover a personal account in one
-// run while staying well inside an action's 10-minute limit. Override with the
-// `ceiling` arg if a truly large account needs a different bound.
-const BACKFILL_CEILING = 5000;
+// run while keeping the serial embed loop comfortably inside an action's
+// 10-minute limit. A larger account re-runs (each run embeds the next batch) or
+// passes an explicit `ceiling`.
+const BACKFILL_CEILING = 2000;
 
 function personText(p: {
   name: string;
