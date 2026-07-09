@@ -49,9 +49,11 @@ export default function Settings() {
         <CardHeader>
           <CardTitle>Delete my data</CardTitle>
           <CardDescription>
-            Permanently removes everything Warmline stores about you: imported
-            contacts, connections, events, your goal, votes, recommendations,
-            usage counts, and your account itself. There is no undo
+            Permanently removes the personal data Warmline stores about you:
+            imported contacts, connections, events, your goal, votes,
+            recommendations, usage counts, and your account itself. There is
+            no undo. It leaves one thing, a short signup rate-limit record
+            keyed to an email, and that clears on its own soon after
           </CardDescription>
         </CardHeader>
         <CardContent>

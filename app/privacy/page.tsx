@@ -84,7 +84,9 @@ export default function Privacy() {
         Settings has a Delete my data control. It permanently removes your
         imported contacts, connections, events, goal, votes, recommendations,
         usage counts, uploaded files, cached photos, and your account itself.
-        There is no undo and nothing is retained.
+        There is no undo. The only thing it does not touch is a short record
+        we keep to limit repeated signup attempts, keyed to an email and
+        cleared automatically soon after.
       </p>
 
       <p className="mt-10 text-xs text-foreground/50">
