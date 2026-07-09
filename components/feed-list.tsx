@@ -73,59 +73,25 @@ export function FeedList({
     <TooltipProvider delayDuration={150}>
       <div className="flex flex-col gap-3">
         {rows.map((row) => (
-          <DepthRow key={row.id}>
-            <FeedCard
-              row={row}
-              currentVote={voteFor.get(row.id)}
-              expanded={expanded === row.id}
-              onToggle={() =>
-                setExpanded((cur) => (cur === row.id ? null : row.id))
-              }
-              onVote={(v) => {
-                // A vote closes the card's panel (the card is about to cycle
-                // away) and commits immediately.
-                setExpanded((cur) => (cur === row.id ? null : cur));
-                onVote(row.id, v);
-              }}
-              renderGraph={renderGraph}
-            />
-          </DepthRow>
+          <FeedCard
+            key={row.id}
+            row={row}
+            currentVote={voteFor.get(row.id)}
+            expanded={expanded === row.id}
+            onToggle={() =>
+              setExpanded((cur) => (cur === row.id ? null : row.id))
+            }
+            onVote={(v) => {
+              // A vote closes the card's panel (the card is about to cycle
+              // away) and commits immediately.
+              setExpanded((cur) => (cur === row.id ? null : cur));
+              onVote(row.id, v);
+            }}
+            renderGraph={renderGraph}
+          />
         ))}
       </div>
     </TooltipProvider>
-  );
-}
-
-// Task: subtle 3D scroll depth. As a row travels through the viewport it eases
-// from slightly recessed (smaller, dimmer, nudged down) at the edges to full
-// presence at center, on a spring. Transform + opacity ONLY (GPU-cheap), so it
-// never triggers layout. Applied to a WRAPPER so the inner card's vote-wheel
-// `layout` animation is untouched. Fully disabled under prefers-reduced-motion
-// (renders a plain div) and viewport-relative, so it works at every width.
-function DepthRow({ children }: { children: React.ReactNode }) {
-  const reduceMotion = useReducedMotion();
-  const ref = useRef<HTMLDivElement>(null);
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    // From the row's top touching the viewport bottom, to its bottom touching
-    // the viewport top: 0 → entering, 0.5 → centered, 1 → leaving.
-    offset: ["start end", "end start"],
-  });
-  // Peaks at center, dips at both edges.
-  const depth = useTransform(scrollYProgress, [0, 0.5, 1], [0, 1, 0]);
-  const eased = useSpring(depth, { stiffness: 120, damping: 30, mass: 0.4 });
-  const scale = useTransform(eased, [0, 1], [0.98, 1]);
-  const opacity = useTransform(eased, [0, 1], [0.86, 1]);
-  const y = useTransform(eased, [0, 1], [10, 0]);
-
-  if (reduceMotion) return <>{children}</>;
-  return (
-    <motion.div
-      ref={ref}
-      style={{ scale, opacity, y, willChange: "transform, opacity" }}
-    >
-      {children}
-    </motion.div>
   );
 }
 
@@ -170,14 +136,39 @@ function FeedCard({
 }) {
   const reduceMotion = useReducedMotion();
   const sub = [row.role, row.company].filter(Boolean).join(" · ");
+
+  // Task: subtle 3D scroll depth. As a card travels through the viewport it
+  // eases from slightly recessed (smaller, dimmer, nudged down) at the edges to
+  // full presence at center, on a spring. The transforms live on the card
+  // ITSELF, not a wrapper: Motion composes an element's own scale/opacity/y
+  // with its layout projection, so the vote-wheel FLIP (layout="position")
+  // stays correct — a scroll-changing ancestor transform would distort it.
+  // Transform + opacity only (GPU-cheap; Motion manages will-change). Fully
+  // disabled under prefers-reduced-motion, and viewport-relative so it works at
+  // every width.
+  const ref = useRef<HTMLElement>(null);
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    // Row top at viewport bottom → row bottom at viewport top: 0 entering,
+    // 0.5 centered, 1 leaving.
+    offset: ["start end", "end start"],
+  });
+  const depth = useTransform(scrollYProgress, [0, 0.5, 1], [0, 1, 0]);
+  const eased = useSpring(depth, { stiffness: 120, damping: 30, mass: 0.4 });
+  const scale = useTransform(eased, [0, 1], [0.98, 1]);
+  const opacity = useTransform(eased, [0, 1], [0.86, 1]);
+  const y = useTransform(eased, [0, 1], [10, 0]);
+
   return (
     <motion.article
+      ref={ref}
       layout="position"
       transition={
         reduceMotion
           ? { duration: 0 }
           : { type: "spring", duration: 0.35, bounce: 0.15 }
       }
+      style={reduceMotion ? undefined : { scale, opacity, y }}
       onClick={onToggle}
       className={cn(
         "cursor-pointer rounded-xl border bg-card p-5 [box-shadow:var(--shadow-s)] transition-colors",
