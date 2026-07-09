@@ -119,6 +119,34 @@
     return parts;
   }
 
+  // Find the named mutuals inside a module. LinkedIn frequently renders the
+  // facet link as a COUNT-only anchor ("12 mutual connections") while the named
+  // sentence ("Phil and Fred are mutual connections") sits in a nested <span>
+  // — and a parent's textContent can fold in avatar initials, a degree badge,
+  // or visually-hidden text that breaks the parse. So we can't read one node's
+  // text: we scan `root` and its descendants and keep the SHORTEST text that
+  // still parses to a name — the tightest, cleanest node holding the sentence.
+  function namedMutualsIn(root) {
+    if (!root) return [];
+    var best = [];
+    var bestLen = Infinity;
+    function consider(el) {
+      var t = clean(el && el.textContent);
+      if (!t || t.length > 300 || !/mutual connection/i.test(t)) return;
+      var names = parseNamedMutuals(t);
+      if (names.length && t.length < bestLen) {
+        best = names;
+        bestLen = t.length;
+      }
+    }
+    consider(root);
+    var nodes = root.querySelectorAll
+      ? root.querySelectorAll("span, div, p, a, li")
+      : [];
+    for (var i = 0; i < nodes.length; i++) consider(nodes[i]);
+    return best;
+  }
+
   // Mutuals shown on a profile: slug-bearing /in/ links first, else the
   // named-inline text variant (name-only). Also returns the facet href so the
   // popup can offer the results-page capture.
@@ -142,7 +170,11 @@
       return { mutuals: linkMutuals, pattern: "links", facetHref: facetHref };
     }
 
-    var named = parseNamedMutuals(anchor.textContent);
+    // Named-inline variant: scan the module (not just the anchor's own text)
+    // for the tightest node holding "… are mutual connections".
+    var searchRoot =
+      (anchor.closest && anchor.closest("section")) || card || anchor;
+    var named = namedMutualsIn(searchRoot);
     if (named.length) {
       return {
         mutuals: named.map(function (n) {
@@ -195,7 +227,10 @@
     return out;
   }
 
-  // User-initiated only. No auto-send.
+  // User-initiated only. No auto-send. Guarded so this file can also be
+  // imported outside the extension (the parser is unit-tested against a DOM
+  // fixture), where `chrome` does not exist.
+  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage)
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg) return false;
 
@@ -234,4 +269,15 @@
 
     return false;
   });
+
+  // Expose the pure parsing helpers for unit tests (no-op in the browser,
+  // where `module` is undefined).
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+      parseNamedMutuals: parseNamedMutuals,
+      namedMutualsIn: namedMutualsIn,
+      facetHrefFor: facetHrefFor,
+      slugFromHref: slugFromHref,
+    };
+  }
 })();
