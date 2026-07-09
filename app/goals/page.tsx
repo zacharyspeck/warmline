@@ -123,7 +123,7 @@ export default function Goals() {
         />
         <TagInput
           id="target-locations"
-          label="Locations (optional)"
+          label="Locations"
           values={targets.locations}
           onChange={(locations) => setTargets((t) => ({ ...t, locations }))}
           placeholder="Add a location and press Enter"
