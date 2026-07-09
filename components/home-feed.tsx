@@ -11,6 +11,7 @@ import dynamic from "next/dynamic";
 import { FeedList } from "@/components/feed-list";
 import { AddTargets } from "@/components/add-targets";
 import { Button } from "@/components/ui/button";
+import { ChevronDownIcon, ChevronUpIcon } from "@/components/icons";
 
 // The React Flow warm-path graph is heavy (canvas + its stylesheet); code-split
 // it so it only loads when a card actually expands.
@@ -105,6 +106,26 @@ export default function HomeFeed() {
     return [...ranked, ...cycled];
   }, [feed, demoted]);
 
+  // The feed splits into two sections: the headline is new people to reach
+  // (leads); in-network people to reconnect with (connectors) sit in a
+  // collapsed secondary section. Order within each preserves the ranked +
+  // vote-cycled order above.
+  const leads = useMemo(() => rows.filter((r) => r.kind === "lead"), [rows]);
+  const connectors = useMemo(
+    () => rows.filter((r) => r.kind === "connector"),
+    [rows],
+  );
+  const hasLeads = leads.length > 0;
+
+  const onVoteRow = (personId: Id<"persons">, v: "up" | "down") => {
+    if (!icp) return;
+    void vote({ icpId: icp._id, personId, vote: v });
+    setDemoted((prev) => new Map(prev).set(personId, demoteSeq.current++));
+  };
+  const renderGraph = (personId: Id<"persons">) => (
+    <GraphAccordion personId={personId} />
+  );
+
   // The goal line under the title (S3): the real goal text, trimmed so the
   // header stays one line, with the amber Edit goal link into the Goals editor.
   const goal =
@@ -146,19 +167,46 @@ export default function HomeFeed() {
                 : "Your network is imported but not yet ranked against your goal, so this order is provisional. Ranking runs after an import and with the daily refresh"}
             </p>
           ) : null}
-          <FeedList
-            rows={rows}
-            voteFor={voteFor}
-            onVote={(personId, v) => {
-              if (icp) {
-                void vote({ icpId: icp._id, personId, vote: v });
-                setDemoted((prev) =>
-                  new Map(prev).set(personId, demoteSeq.current++),
-                );
-              }
-            }}
-            renderGraph={(personId) => <GraphAccordion personId={personId} />}
-          />
+
+          {hasLeads ? (
+            <>
+              <FeedList
+                rows={leads}
+                voteFor={voteFor}
+                onVote={onVoteRow}
+                renderGraph={renderGraph}
+              />
+              {connectors.length > 0 ? (
+                <ReconnectSection count={connectors.length}>
+                  <FeedList
+                    rows={connectors}
+                    voteFor={voteFor}
+                    onVote={onVoteRow}
+                    renderGraph={renderGraph}
+                  />
+                </ReconnectSection>
+              ) : null}
+            </>
+          ) : (
+            // Zero leads: point the user at ways to add people, and offer at
+            // most five warm connectors to start with — never the full wall.
+            <>
+              <ZeroLeadCTA />
+              {connectors.length > 0 ? (
+                <section className="mt-8">
+                  <h2 className="mb-3 text-[13px] font-medium uppercase tracking-[0.1em] text-muted-foreground/70">
+                    Warm connectors to start with
+                  </h2>
+                  <FeedList
+                    rows={connectors.slice(0, 5)}
+                    voteFor={voteFor}
+                    onVote={onVoteRow}
+                    renderGraph={renderGraph}
+                  />
+                </section>
+              ) : null}
+            </>
+          )}
         </>
       )}
     </div>
@@ -202,6 +250,68 @@ function EmptyFeed({
       )}
       <div className="mx-auto mt-8 max-w-md">
         <AddTargets />
+      </div>
+    </div>
+  );
+}
+
+// The in-network reconnect rows, collapsed by default so the headline stays
+// the new people to reach. Expanding reveals the full FeedList (voting, graph).
+function ReconnectSection({
+  count,
+  children,
+}: {
+  count: number;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="mt-8">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:border-ring/40"
+      >
+        <span className="text-sm font-medium text-foreground">
+          Reconnect with your network
+          <span className="ml-1.5 text-muted-foreground">({count})</span>
+        </span>
+        {open ? (
+          <ChevronUpIcon className="size-4 text-muted-foreground" aria-hidden />
+        ) : (
+          <ChevronDownIcon
+            className="size-4 text-muted-foreground"
+            aria-hidden
+          />
+        )}
+      </button>
+      {open ? <div className="mt-3">{children}</div> : null}
+    </section>
+  );
+}
+
+// Zero-lead call to action: the three ways to put real people into the feed.
+function ZeroLeadCTA() {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-6 [box-shadow:var(--shadow-s)]">
+      <h2 className="text-[15px] font-semibold text-foreground">
+        No target people yet
+      </h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Your feed fills with people once you tell it who you want to meet. Three
+        ways to start:
+      </p>
+      <div className="mt-4">
+        <AddTargets />
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2.5">
+        <Button variant="outline" asChild>
+          <Link href="/goals">Add target companies</Link>
+        </Button>
+        <Button variant="outline" asChild>
+          <Link href="/connectors">Install the Chrome extension</Link>
+        </Button>
       </div>
     </div>
   );
