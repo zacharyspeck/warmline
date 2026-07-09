@@ -1,13 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import {
-  motion,
-  useReducedMotion,
-  useScroll,
-  useSpring,
-  useTransform,
-} from "motion/react";
+import { useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -137,38 +131,37 @@ function FeedCard({
   const reduceMotion = useReducedMotion();
   const sub = [row.role, row.company].filter(Boolean).join(" · ");
 
-  // Task: subtle 3D scroll depth. As a card travels through the viewport it
-  // eases from slightly recessed (smaller, dimmer, nudged down) at the edges to
-  // full presence at center, on a spring. The transforms live on the card
-  // ITSELF, not a wrapper: Motion composes an element's own scale/opacity/y
-  // with its layout projection, so the vote-wheel FLIP (layout="position")
-  // stays correct — a scroll-changing ancestor transform would distort it.
-  // Transform + opacity only (GPU-cheap; Motion manages will-change). Fully
-  // disabled under prefers-reduced-motion, and viewport-relative so it works at
-  // every width.
-  const ref = useRef<HTMLElement>(null);
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    // Row top at viewport bottom → row bottom at viewport top: 0 entering,
-    // 0.5 centered, 1 leaving.
-    offset: ["start end", "end start"],
-  });
-  const depth = useTransform(scrollYProgress, [0, 0.5, 1], [0, 1, 0]);
-  const eased = useSpring(depth, { stiffness: 120, damping: 30, mass: 0.4 });
-  const scale = useTransform(eased, [0, 1], [0.98, 1]);
-  const opacity = useTransform(eased, [0, 1], [0.86, 1]);
-  const y = useTransform(eased, [0, 1], [10, 0]);
+  // Task: subtle 3D scroll depth. As a card enters the viewport it eases from
+  // slightly recessed (smaller, dimmer, nudged down) to full presence, and
+  // recedes again as it leaves — a spring, transform + opacity only (GPU-cheap).
+  // Driven by whileInView (IntersectionObserver), NOT a per-frame scroll
+  // measurement of the card: measuring a `layout` node that reorders/unmounts
+  // is what crashes with "parentNode of null". The depth lives on the card
+  // itself, so Motion composes it with the layout projection and the vote-wheel
+  // FLIP stays exact — the FLIP keeps its own unchanged `layout` transition.
+  // Fully disabled under prefers-reduced-motion; viewport-relative at any width.
+  const depthAnim = reduceMotion
+    ? {}
+    : {
+        initial: { scale: 0.98, opacity: 0.86, y: 10 },
+        whileInView: { scale: 1, opacity: 1, y: 0 },
+        viewport: { amount: 0.35, margin: "-8% 0px -8% 0px" },
+      };
 
   return (
     <motion.article
-      ref={ref}
       layout="position"
+      {...depthAnim}
       transition={
         reduceMotion
           ? { duration: 0 }
-          : { type: "spring", duration: 0.35, bounce: 0.15 }
+          : {
+              // Vote-wheel FLIP: unchanged from before this effect existed.
+              layout: { type: "spring", duration: 0.35, bounce: 0.15 },
+              // The depth ease-in/out on its own spring.
+              default: { type: "spring", stiffness: 120, damping: 30, mass: 0.4 },
+            }
       }
-      style={reduceMotion ? undefined : { scale, opacity, y }}
       onClick={onToggle}
       className={cn(
         "cursor-pointer rounded-xl border bg-card p-5 [box-shadow:var(--shadow-s)] transition-colors",
