@@ -50,31 +50,51 @@
     return { slug: slug, name: clean(h1 && h1.textContent) };
   }
 
+  // The mutual-connections facet link uses either param, in either case:
+  //   ?facetConnectionOf=…   or   ?connectionOf=…
+  function isFacetHref(href) {
+    return /connectionof/i.test(href || "");
+  }
+
   // The element anchoring the mutual-connections module, plus its facet link.
   function findMutualAnchor() {
-    // SELECTOR: the "N mutual connections" link → /search/...facetConnectionOf=
-    var byFacet =
-      document.querySelector('a[href*="facetConnectionOf"]') ||
-      document.querySelector('a[href*="connectionOf"]');
-    if (byFacet) return byFacet;
+    // SELECTOR: the mutuals link → /search/...(facet)connectionOf=… . Prefer an
+    // anchor that actually names mutuals (its own <strong> tags) over a bare
+    // "N mutual connections" count link that carries the same param.
+    var anchors = document.querySelectorAll("a[href]");
+    var facet = [];
+    for (var i = 0; i < anchors.length; i++) {
+      if (isFacetHref(anchors[i].getAttribute("href"))) facet.push(anchors[i]);
+    }
+    for (var j = 0; j < facet.length; j++) {
+      if (facet[j].querySelector && facet[j].querySelector("strong")) {
+        return facet[j];
+      }
+    }
+    if (facet.length) return facet[0];
     // SELECTOR: text fallback — any node reading "… mutual connection(s)".
     var nodes = document.querySelectorAll("a, span, p, div");
-    for (var i = 0; i < nodes.length; i++) {
-      var t = nodes[i].textContent || "";
-      if (/mutual connection/i.test(t) && t.length < 200) return nodes[i];
+    for (var k = 0; k < nodes.length; k++) {
+      var t = nodes[k].textContent || "";
+      if (/mutual connection/i.test(t) && t.length < 200) return nodes[k];
     }
     return null;
   }
 
   function facetHrefFor(anchor) {
     if (!anchor) return null;
-    var a =
-      (anchor.matches &&
-        anchor.matches('a[href*="facetConnectionOf"], a[href*="connectionOf"]') &&
-        anchor) ||
-      (anchor.querySelector &&
-        (anchor.querySelector('a[href*="facetConnectionOf"]') ||
-          anchor.querySelector('a[href*="connectionOf"]')));
+    var a = null;
+    if (anchor.getAttribute && isFacetHref(anchor.getAttribute("href"))) {
+      a = anchor;
+    } else if (anchor.querySelectorAll) {
+      var inner = anchor.querySelectorAll("a[href]");
+      for (var i = 0; i < inner.length; i++) {
+        if (isFacetHref(inner[i].getAttribute("href"))) {
+          a = inner[i];
+          break;
+        }
+      }
+    }
     var href = a && a.getAttribute("href");
     if (!href) return null;
     try {
@@ -147,6 +167,26 @@
     return best;
   }
 
+  // The reliable signal on the current layout: each mutual's name is wrapped in
+  // its own <strong> directly inside the facet anchor, e.g.
+  //   <a …connectionOf=…><strong>Phil</strong> and <strong>Fred</strong> …</a>
+  // Read each <strong>'s text as a name (deduped, skipping counts/labels).
+  function strongNamesIn(anchor) {
+    if (!anchor || !anchor.querySelectorAll) return [];
+    var strongs = anchor.querySelectorAll("strong");
+    var out = [];
+    var seen = Object.create(null);
+    for (var i = 0; i < strongs.length; i++) {
+      var name = clean(strongs[i].textContent);
+      if (!name || /^\d/.test(name) || /mutual connection/i.test(name)) continue;
+      var key = name.toLowerCase();
+      if (seen[key]) continue;
+      seen[key] = true;
+      out.push(name);
+    }
+    return out;
+  }
+
   // Mutuals shown on a profile: slug-bearing /in/ links first, else the
   // named-inline text variant (name-only). Also returns the facet href so the
   // popup can offer the results-page capture.
@@ -170,11 +210,16 @@
       return { mutuals: linkMutuals, pattern: "links", facetHref: facetHref };
     }
 
-    // Named-inline variant: scan the module (not just the anchor's own text)
-    // for the tightest node holding "… are mutual connections".
-    var searchRoot =
-      (anchor.closest && anchor.closest("section")) || card || anchor;
-    var named = namedMutualsIn(searchRoot);
+    // Named-inline variant. Primary signal: each name in its own <strong>
+    // inside the facet anchor. Fall back to parsing the sentence text (scanning
+    // the module for the tightest "… are mutual connections" node) only when
+    // the anchor carries no <strong> names.
+    var named = strongNamesIn(anchor);
+    if (!named.length) {
+      var searchRoot =
+        (anchor.closest && anchor.closest("section")) || card || anchor;
+      named = namedMutualsIn(searchRoot);
+    }
     if (named.length) {
       return {
         mutuals: named.map(function (n) {
@@ -184,7 +229,14 @@
         facetHref: facetHref,
       };
     }
-    return { mutuals: [], pattern: "none", facetHref: facetHref };
+    // No names parsed, but the facet link is real: always hand off to the
+    // results-page capture so a future layout change degrades gracefully
+    // instead of silently reporting zero.
+    return {
+      mutuals: [],
+      pattern: facetHref ? "facet-only" : "none",
+      facetHref: facetHref,
+    };
   }
 
   // Best-effort headline for a search result row.
@@ -276,6 +328,7 @@
     module.exports = {
       parseNamedMutuals: parseNamedMutuals,
       namedMutualsIn: namedMutualsIn,
+      strongNamesIn: strongNamesIn,
       facetHrefFor: facetHrefFor,
       slugFromHref: slugFromHref,
     };

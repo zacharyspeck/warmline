@@ -107,11 +107,22 @@ function reportCounts(prefix, pattern, data) {
   const shown = data.shown ?? 0;
   const matched = data.matched ?? 0;
   const skipped = data.skipped ?? 0;
-  setStatus(`${prefix} — ${matched} of ${shown} mutuals captured`, "ok");
+  // Guide the user to the results-page capture whenever names are missing or
+  // only some matched — the facet handoff is already stored either way.
+  const needList =
+    pattern === "facet-only" || (skipped > 0 && pattern === "named-inline");
+  if (pattern === "facet-only") {
+    setStatus(
+      `${prefix} captured — open the mutual-connections list to add mutuals`,
+      "ok",
+    );
+  } else {
+    setStatus(`${prefix} — ${matched} of ${shown} mutuals captured`, "ok");
+  }
   setDiag(
     `pattern: ${pattern} · shown ${shown} · matched ${matched} · skipped ${skipped}` +
-      (skipped > 0 && pattern === "named-inline"
-        ? " · open the mutual-connections list to capture the rest"
+      (needList
+        ? " · open the mutual-connections list and click Capture mutuals shown"
         : ""),
   );
 }
