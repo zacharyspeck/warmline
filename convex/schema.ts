@@ -93,6 +93,28 @@ export default defineSchema({
     .index("by_tokenHash", ["tokenHash"])
     .index("by_user", ["userId"]),
 
+  // Per-company result of "discover real people at my target companies": when a
+  // goal is saved with target companies, convex/discover.ts scrapes each one's
+  // public team/about page once and records an honest note here — how many
+  // people it created, or that no team page was found — surfaced on the Goals
+  // screen. One row per user per company (upserted). Purged by delete-my-data.
+  companyDiscovery: defineTable({
+    userId: v.id("users"),
+    company: v.string(),
+    status: v.union(
+      v.literal("found"),
+      v.literal("no_page"),
+      v.literal("no_people"),
+      v.literal("capped"),
+      v.literal("error"),
+    ),
+    found: v.number(),
+    note: v.string(),
+    at: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_and_company", ["userId", "company"]),
+
   // Pricing-page "Request access" rows (no payment processing; the owner
   // follows up by hand). One row per user per plan; purged by delete-my-data
   // like every user-owned table.
@@ -152,6 +174,10 @@ export default defineSchema({
     mutualsStatus: v.optional(
       v.union(v.literal("pending"), v.literal("done"), v.literal("failed")),
     ),
+    // Provenance: true when this lead was created by scraping a target
+    // company's public team/about page (convex/discover.ts), so the surface can
+    // mark it as web-discovered rather than imported or hand-added.
+    discoveredFromWeb: v.optional(v.boolean()),
   })
     .index("by_linkedinUrl", ["linkedinUrl"])
     .index("by_xHandle", ["xHandle"])

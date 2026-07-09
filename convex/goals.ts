@@ -30,6 +30,16 @@ export const saveGoal = action({
       targets: args.targets,
     });
     await ctx.runAction(internal.rank.rebuild, { icpId });
+    // If the goal names target companies, discover real people at each from
+    // their public team page (scheduled: bounded by the shared scrape reserve,
+    // writes leads + honest per-company notes, then re-ranks). Never blocks the
+    // save, never runs without a user-initiated goal save.
+    if (args.targets.companies.length > 0) {
+      await ctx.scheduler.runAfter(0, internal.discover.discoverForGoal, {
+        userId,
+        companies: args.targets.companies,
+      });
+    }
     return { icpId };
   },
 });

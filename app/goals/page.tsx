@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { TagInput } from "@/components/tag-input";
 import { AddTargets } from "@/components/add-targets";
+import { DiscoveryNotes } from "@/components/discovery-notes";
 
 type Targets = { companies: string[]; roles: string[]; locations: string[] };
 const EMPTY: Targets = { companies: [], roles: [], locations: [] };
@@ -152,6 +153,8 @@ export default function Goals() {
       <div className="mt-6">
         <AddTargets />
       </div>
+
+      <DiscoveryNotes />
 
       <p className="mt-4 text-xs text-muted-foreground">
         Want to start over from your product site?{" "}

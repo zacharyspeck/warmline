@@ -118,6 +118,62 @@ export async function draftReconnectOpener(input: {
   return sanitizeCopy(typeof parsed.opener === "string" ? parsed.opener : "");
 }
 
+export type TeamPerson = { name: string; role?: string };
+
+// Extract the real, named people from a company's scraped team/about page.
+// Used by target-company discovery (convex/discover.ts): one gpt-4o-mini call,
+// paired 1:1 with the Firecrawl fetch as a single scrape unit. Returns [] on a
+// shape miss so the caller records an honest "no people found" note. Names only
+// — never invents people, never returns generic labels or customers/investors.
+export async function extractTeamPeople(
+  siteMarkdown: string,
+): Promise<TeamPerson[]> {
+  const sys =
+    "You read a company's team or about page and extract the real, named people who work there. " +
+    'Output strict JSON {"people":[{"name":"First Last","role":"their title"}]}. ' +
+    "Include ONLY real individuals with a first and last name who work at this company. " +
+    "Skip section headings, taglines, testimonials, customers, investors, and advisors. " +
+    "Use the exact role text on the page; omit role if none is given. " +
+    'If the page names no team members, return {"people":[]}. Never invent a person.';
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey()}`,
+    },
+    body: JSON.stringify({
+      model: CHAT_MODEL,
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: siteMarkdown.slice(0, 6000) },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.1,
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenAI team ${res.status}`);
+  const data = (await res.json()) as {
+    choices: { message: { content: string } }[];
+  };
+  let parsed: { people?: unknown };
+  try {
+    parsed = JSON.parse(data.choices[0]?.message?.content ?? "{}");
+  } catch {
+    return [];
+  }
+  const rows = Array.isArray(parsed.people) ? parsed.people : [];
+  const out: TeamPerson[] = [];
+  for (const r of rows) {
+    const name = String((r as { name?: unknown })?.name ?? "").trim();
+    // Require a plausible full name (at least two tokens) — drops stray labels.
+    if (!name || name.split(/\s+/).length < 2) continue;
+    const roleRaw = (r as { role?: unknown })?.role;
+    const role = typeof roleRaw === "string" ? roleRaw.trim() : "";
+    out.push(role ? { name, role } : { name });
+  }
+  return out;
+}
+
 export type Judgement = {
   why: { text: string; confidence: "high" | "medium" | "low" }[];
   how: string[]; // 3 concrete ways to connect

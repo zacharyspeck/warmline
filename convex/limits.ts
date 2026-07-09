@@ -29,7 +29,16 @@ export const TIER_LIMITS: Record<string, { judge: number; embed: number }> = {
 };
 
 // ── Per-user daily scrape cap (flat — the same for every tier) ──
+// Bounds ALL scrape units a user can spend in a day: onboarding's product-site
+// scrape AND target-company discovery scrapes draw from this same pool.
 export const SCRAPE_PER_USER = 5;
+
+// ── Target-company people discovery (convex/discover.ts) ──
+// When a goal is saved with target companies, discovery scrapes at most this
+// many of them per save (each a scrape UNIT, so also bounded by the daily
+// scrape caps above), and creates at most this many leads per company.
+export const DISCOVER_COMPANIES_PER_SAVE = 3;
+export const DISCOVER_LEADS_PER_COMPANY = 10;
 
 // ── Global daily caps across ALL users, per category: the hard ceiling ──
 export const GLOBAL_LIMITS: Record<Category, number> = {

@@ -48,7 +48,7 @@ const TARGET_SCAN = 200;
 
 // Dedup a target with no slug against the caller's existing persons by name
 // within the same company (case-insensitive), bounded to TARGET_SCAN reads.
-async function findByNameCompany(
+export async function findByNameCompany(
   ctx: MutationCtx,
   userId: Id<"users">,
   name: string,
