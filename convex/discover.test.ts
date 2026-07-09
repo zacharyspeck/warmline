@@ -152,6 +152,9 @@ test("discoverForGoal: out of scrape budget records a capped note and writes no 
     });
   });
 
+  // A key IS configured here — the capped path is about budget, not setup.
+  // (Keyless runs are gated out before the reserve; see the test below.)
+  vi.stubEnv("FIRECRAWL_API_KEY", "fc-test");
   let fetched = false;
   vi.stubGlobal("fetch", async () => {
     fetched = true;
@@ -164,6 +167,7 @@ test("discoverForGoal: out of scrape budget records a capped note and writes no 
     });
   } finally {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   }
   expect(fetched).toBe(false);
 
@@ -178,6 +182,60 @@ test("discoverForGoal: out of scrape budget records a capped note and writes no 
     .withIdentity({ subject: `${userId}|s1` })
     .query(api.discover.notesForGoal, {});
   expect(notes[0].status).toBe("capped");
+});
+
+test("discoverForGoal: no Firecrawl key gates out BEFORE any reserve — honest note, 0 budget, 0 leads", async () => {
+  const t = convexTest(schema, modules);
+  const { userId, as } = await newUser(t, "discover-nokey@example.com");
+
+  // Whitespace-only key must read as NOT configured (the trim rule).
+  vi.stubEnv("FIRECRAWL_API_KEY", "   ");
+  let fetches = 0;
+  vi.stubGlobal("fetch", async () => {
+    fetches++;
+    throw new Error("no network without a key");
+  });
+  try {
+    await t.action(internal.discover.discoverForGoal, {
+      userId,
+      companies: ["Rogo", "Model ML"],
+    });
+  } finally {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  }
+
+  // No Firecrawl call was even attempted.
+  expect(fetches).toBe(0);
+
+  // ZERO scrape budget reserved: no usage row was ever created for the user.
+  const usage = await t.run(async (ctx) =>
+    ctx.db
+      .query("usage")
+      .withIndex("by_user_and_day", (q) => q.eq("userId", userId))
+      .collect(),
+  );
+  expect(usage.reduce((sum, row) => sum + row.scrape, 0)).toBe(0);
+
+  // Every company gets the truthful not-configured note (exact copy).
+  const notes = await as.query(api.discover.notesForGoal, {});
+  expect(notes.length).toBe(2);
+  for (const n of notes) {
+    expect(n.status).toBe("not_configured");
+    expect(n.found).toBe(0);
+    expect(n.note).toBe(
+      "Company scraping is not set up yet, so no team pages were checked. Add people from this company by hand or capture them with the extension",
+    );
+  }
+
+  // And zero leads were created.
+  const persons = await t.run(async (ctx) =>
+    ctx.db
+      .query("persons")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect(),
+  );
+  expect(persons.length).toBe(0);
 });
 
 test("discoverForGoal: scrapes a team page, creates deduped leads, re-ranks", async () => {

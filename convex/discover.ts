@@ -22,10 +22,19 @@ import {
 // on the Goals screen — including "no team page found" — so nothing fails
 // silently. No background crawling: this runs only on a save the user made.
 
-// Scrape a page → clean markdown (Firecrawl). Empty string when there is no key
-// or the fetch fails, so the caller records an honest "no page" note.
+// THE key check — single source of truth, shared by the discoverForGoal gate
+// and scrapeMarkdown so they can never disagree. Trimmed; missing, empty, or
+// whitespace-only all mean "not configured".
+function firecrawlKey(): string | null {
+  const key = process.env.FIRECRAWL_API_KEY?.trim();
+  return key ? key : null;
+}
+
+// Scrape a page → clean markdown (Firecrawl). Empty string when the fetch
+// fails, so the caller records an honest "no page" note. (Keyless callers are
+// gated out before any budget is reserved; the check here is belt and braces.)
 async function scrapeMarkdown(url: string): Promise<string> {
-  const key = process.env.FIRECRAWL_API_KEY;
+  const key = firecrawlKey();
   if (!key) return "";
   try {
     const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
@@ -81,9 +90,11 @@ function dedupeCompanies(companies: string[]): string[] {
 
 const NOTE: Record<string, (found: number) => string> = {
   found: (n) => `Added ${n} ${n === 1 ? "person" : "people"} from their team page`,
-  no_page: () => "No public team page found — add these people by hand or capture them with the extension",
+  no_page: () => "No public team page found. Add these people by hand or capture them with the extension",
   no_people: () => "Found a page but no named team members on it",
-  capped: () => "Daily discovery limit reached — try again tomorrow",
+  not_configured: () =>
+    "Company scraping is not set up yet, so no team pages were checked. Add people from this company by hand or capture them with the extension",
+  capped: () => "Daily discovery limit reached, try again tomorrow",
   error: () => "Could not read this company right now",
 };
 
@@ -97,6 +108,7 @@ export const recordDiscovery = internalMutation({
       v.literal("found"),
       v.literal("no_page"),
       v.literal("no_people"),
+      v.literal("not_configured"),
       v.literal("capped"),
       v.literal("error"),
     ),
@@ -178,6 +190,23 @@ export const discoverForGoal = internalAction({
       0,
       DISCOVER_COMPANIES_PER_SAVE,
     );
+
+    // GATE: without a Firecrawl key, no scrape can ever be attempted — so no
+    // budget may be reserved and no "no team page found" note may be written
+    // (the server never looked). Tell the truth per company and stop here; the
+    // rest of the goal save is unaffected.
+    if (!firecrawlKey()) {
+      for (const company of companies) {
+        await ctx.runMutation(internal.discover.recordDiscovery, {
+          userId: args.userId,
+          company,
+          status: "not_configured",
+          people: [],
+        });
+      }
+      return null;
+    }
+
     let anyFound = false;
     for (const company of companies) {
       // Reserve one scrape unit per Firecrawl fetch so the daily scrape cap

@@ -105,6 +105,9 @@ export default defineSchema({
       v.literal("found"),
       v.literal("no_page"),
       v.literal("no_people"),
+      // Scraping isn't configured on this deployment (no Firecrawl key), so
+      // nothing was checked — distinct from "we looked and found no page".
+      v.literal("not_configured"),
       v.literal("capped"),
       v.literal("error"),
     ),
